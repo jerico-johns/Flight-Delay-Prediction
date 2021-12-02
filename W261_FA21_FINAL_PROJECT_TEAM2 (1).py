@@ -897,10 +897,185 @@ train_model
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC 
 # MAGIC # Algorithm Implementation
 # MAGIC Create your own toy example that matches the dataset provided and use this toy example to explain the math behind the algorithm that you will perform. Apply your algorithm to the training dataset and evaluate your results on the test set. 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Decision Tree Explination and Toy Example:  
+# MAGIC [Source](https://towardsdatascience.com/a-dive-into-decision-trees-a128923c9298)
+# MAGIC 
+# MAGIC Decision Trees operate by selecting the optimal features to split the data. The data is split either until a pre-definened parameter is met, like maximum depth or minimum information gain, or until the data is perfectly split. The nodes of a tree represent a feature the data is split on, each node will have a branch that either leads to another node where another split takes place, or to a leaf which represents the decision the tree arrives at. Decision Trees can be used in both classification and regression, in this project we are working on classifying if a plane is delayed greater than 15 minutes or not, so we will focus on classification.
+# MAGIC 
+# MAGIC When a decision tree splits the data it must determine which feature to split and how to split it optimally. For a split to be optimal, it must maximize the possible information gain. In spark the default implemenation calulates the gini impurity to measure how optimal a split is. The lower the gini impurity, the higher the information gain and the better the split. A pure split with all 0's in one leaf and all 1's in another would have a gini impurity of 0. A perfectly impure split, which results in an equal number of each class in each branch would result in the maximum gini impurity of 0.5 which represents no information gain. 
+# MAGIC 
+# MAGIC The equation for gini impurity is:  
+# MAGIC \\(gini\ impurity = 1 - P(class\ 1)^2 - P(class\ 2)^2 \\)
+# MAGIC 
+# MAGIC The above equation is used to determine how to split a given feature optimally. In the case of a categorical feature, the gini impurity is calculated for each branch on each possible split of the feature, we then take the weighted average gini impurity across both branches to determine the overall gini impurity for each split. Below is the equation for the weighted average of gini impurity.
+# MAGIC 
+# MAGIC \\(weighted\ average = \frac{branch\ 1\ count}{total\ count}(branch\ 1\ gini\ impurity) + \frac{branch\ 2\ count}{total\ count}(branch\ 2\ gini\ impurity) \\)
+
+# COMMAND ----------
+
+# create a small example data frame
+toy_df = pd.DataFrame({'class': [0, 0, 1, 1, 1, 1, 0, 0], 'categorical_feature': ['a', 'a', 'b', 'c', 'b', 'c', 'b', 'a'], 'continuous_feature': [26, 17, 12, 8, 1, 14, 2, 10]})
+print('original dataframe')
+print(toy_df)
+
+# sort by categorical feature
+toy_df.sort_values(by='categorical_feature', axis=0, inplace=True)
+print('')
+print('sorted dataframe')
+print(toy_df)
+
+# define gini funciton
+def gini(c1, c2):
+  """Returns Gini impurity given class counts"""
+  gini = 1-(c1/(c1+c2))**2 - (c2/(c1+c2))**2
+  return gini
+# define weighted average gini function
+def cumulative_gini(c1a, c2a, c1b, c2b):
+  total = c1a + c2a + c1b + c2b
+  ginia = gini(c1a,c2a) * ((c1a+c2a)/total)
+  ginib = gini(c1b,c2b) * ((c1b+c2b)/total)
+  return ginia + ginib
+
+print('Split on "a"')
+print('Branch 1:')
+# split data frame on categorical feature, split feature on 'a'
+# get class 0 count for branch 1
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] == 'a' and x['class'] == 0 else False, axis=1)
+b1_class_0_count = len(split_condition[split_condition == True])
+
+print(f'Branch 1, Class 0 count: {b1_class_0_count}')
+# get class 1 count for branch 1
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] == 'a' and x['class'] == 1 else False, axis=1)
+b1_class_1_count = len(split_condition[split_condition == True])
+print(f'Branch 1, Class 1 count: {b1_class_1_count}')
+print(f'Branch 1 Gini Impurity: {gini(b1_class_0_count, b1_class_1_count)}')
+print('---')
+print('Branch 2:')
+# split data frame on categorical feature, split feature on 'a'
+# get class 0 count for branch 2
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] != 'a' and x['class'] == 0 else False, axis=1)
+b2_class_0_count = len(split_condition[split_condition == True])
+print(f'Branch 2, Class 0 count: {b2_class_0_count}')
+# get class 1 count for branch 1
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] != 'a' and x['class'] == 1 else False, axis=1)
+b2_class_1_count = len(split_condition[split_condition == True])
+print(f'Branch 2, Class 1 count: {b2_class_1_count}')
+print(f'Branch 2 Gini Impurity: {gini(b2_class_0_count, b2_class_1_count)}')
+print(f'Weighted Gini Impurity for spliting categorical_feature on "a": {cumulative_gini(b1_class_0_count, b1_class_1_count, b2_class_0_count, b2_class_1_count)}')
+print('\n')
+
+print('Split on "b"')
+print('Branch 1:')
+# split data frame on categorical feature, split feature on 'a'
+# get class 0 count for branch 1
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] != 'c' and x['class'] == 0 else False, axis=1)
+b1_class_0_count = len(split_condition[split_condition == True])
+print(f'Branch 1, Class 0 count: {b1_class_0_count}')
+# get class 1 count for branch 1
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] != 'c' and x['class'] == 1 else False, axis=1)
+b1_class_1_count = len(split_condition[split_condition == True])
+print(f'Branch 1, Class 1 count: {b1_class_1_count}')
+print(f'Branch 1 Gini Impurity: {gini(b1_class_0_count, b1_class_1_count)}')
+print('---')
+print('Branch 2:')
+# split data frame on categorical feature, split feature on 'a'
+# get class 0 count for branch 2
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] == 'c' and x['class'] == 0 else False, axis=1)
+b2_class_0_count = len(split_condition[split_condition == True])
+print(f'Branch 2, Class 0 count: {b2_class_0_count}')
+# get class 1 count for branch 1
+split_condition = toy_df.apply(lambda x: True if x['categorical_feature'] == 'c' and x['class'] == 1 else False, axis=1)
+b2_class_1_count = len(split_condition[split_condition == True])
+print(f'Branch 2, Class 1 count: {b2_class_1_count}')
+print(f'Branch 2 Gini Impurity: {gini(b2_class_0_count, b2_class_1_count)}')
+print(f'Weighted Gini Impurity for spliting categorical_feature on "b": {cumulative_gini(b1_class_0_count, b1_class_1_count, b2_class_0_count, b2_class_1_count)}')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC When we split on a continuous feature, the dataframe is sorted by the categorical feature, and the average of every two values is taken. These average values are then consitered as potential split points and the gini impurity is calculated at each potential split point. Below is an example of this.
+
+# COMMAND ----------
+
+# create a small example data frame
+toy_df = pd.DataFrame({'class': [0, 0, 1, 1, 1, 1, 0, 0], 'categorical_feature': ['a', 'a', 'b', 'c', 'b', 'c', 'b', 'a'], 'continuous_feature': [26, 17, 12, 8, 1, 14, 2, 10]})
+print('original dataframe')
+print(toy_df)
+
+# sort by continuosus feature
+toy_df.sort_values(by='continuous_feature', ascending=False, axis=0, inplace=True)
+print('')
+print('continuous feature sorted dataframe')
+print(toy_df)
+
+# calculate averages
+means = []
+for i in range(len(toy_df.continuous_feature)-1):
+  avg_val =  (list(toy_df.continuous_feature)[i] + list(toy_df.continuous_feature)[i+1]) / 2
+  means.append(avg_val)
+means.append(0)
+toy_df['means'] = means
+print('dataframe with means of each pair (shifted up by 1)')
+print(toy_df)
+
+for i in list(toy_df.means[:-1]):
+  print(f'Split on {i}')
+  print('Branch 1:')
+  # split data frame on continuous feature
+  # get class 0 count for branch 1
+  split_condition = toy_df.apply(lambda x: True if x['continuous_feature'] >= i and x['class'] == 0 else False, axis=1)
+  b1_class_0_count = len(split_condition[split_condition == True])
+  print(f'Branch 1, Class 0 count: {b1_class_0_count}')
+  # get class 1 count for branch 1
+  split_condition = toy_df.apply(lambda x: True if x['continuous_feature'] >= i and x['class'] == 1 else False, axis=1)
+  b1_class_1_count = len(split_condition[split_condition == True])
+  print(f'Branch 1, Class 1 count: {b1_class_1_count}')
+  print(f'Branch 1 Gini Impurity: {gini(b1_class_0_count, b1_class_1_count)}')
+  print('Branch 2:')
+  # split data frame on categorical feature, split feature on 'a'
+  # get class 0 count for branch 2
+  split_condition = toy_df.apply(lambda x: True if x['continuous_feature'] < i and x['class'] == 0 else False, axis=1)
+  b2_class_0_count = len(split_condition[split_condition == True])
+  print(f'Branch 2, Class 0 count: {b2_class_0_count}')
+  # get class 1 count for branch 1
+  split_condition = toy_df.apply(lambda x: True if x['continuous_feature'] < i and x['class'] == 1 else False, axis=1)
+  b2_class_1_count = len(split_condition[split_condition == True])
+  print(f'Branch 2, Class 1 count: {b2_class_1_count}')
+  print(f'Branch 2 Gini Impurity: {gini(b2_class_0_count, b2_class_1_count)}')
+  print(f'Weighted Gini Impurity for spliting categorical_feature on {i}: {cumulative_gini(b1_class_0_count, b1_class_1_count, b2_class_0_count, b2_class_1_count)}')
+  print('---')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC After running using the equations detailed above to find the weighted gini impurity at each potential split point of both the categorical and continuous variable, we can see that the optimal split point is the categorical feature, split on 'a' because it results in the lowest gini impurity of 0.199. As a result this feature and split point will be the root (the first split point) of the decision tree. This process will be repeated at each node until 1) there is a pure split, 2) we reach a maximum depth specified as a hyperparameter, or 3) we do not meat a minimum information gain threshold specified as a hyperparameter. Once we meet one of these 3 conditions, the final node on the tree branches becomes a 'leaf' which is what the decision tree will use to make its final decisions.
+# MAGIC   
+# MAGIC   In the context of classification, a decision tree will return the most probable answer on the leaf it ends up on. In our example above, if we had a decision tree that has only one split on the categorical feature at point 'a' then our branches would have the following counts:
+# MAGIC   
+# MAGIC   Leaf 1  
+# MAGIC   class 0 count: 3  
+# MAGIC   class 1 count: 0
+# MAGIC   
+# MAGIC   Leaf 2  
+# MAGIC   class 0 count: 1  
+# MAGIC   class 1 count: 4
+# MAGIC   
+# MAGIC   If we are on leaf 1 of this tree, we will predict class 0 because it has a probability of \\(\frac{3}{3} = 1.0\\) vs the probability of class 1 of \\(\frac{0}{3} = 0.0\\)  
+# MAGIC   
+# MAGIC   
+# MAGIC   If we are on leaf 1 of this tree, we will predict class 1 because it has a probability of \\(\frac{4}{5} = .80\\) vs the probability of class 0 of \\(\frac{1}{5} = .20\\)  
 
 # COMMAND ----------
 
