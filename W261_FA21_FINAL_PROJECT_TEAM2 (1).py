@@ -150,6 +150,8 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
 # MAGIC 
 # MAGIC ## Performance & Evaluation Metrics
 # MAGIC 
+# MAGIC [Source](https://machinelearningmastery.com/fbeta-measure-for-machine-learning/)
+# MAGIC 
 # MAGIC The buisness case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rational is supported by the theory that a pasenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passanger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. 
 # MAGIC 
 # MAGIC This translates into an emphasized adversion to false positives over false negatives. However, we intend to build a prediction model to perform well in both contexts. As such we will use f-beta as our primary evaluation metric. F-beta is similar to F1-score, in that it takes into account both the recall and precision of the model, but f-beta takes a parameter, beta, to tune the sensitivity towards either precision or recall. The equaiton for f-beta is shown below:
