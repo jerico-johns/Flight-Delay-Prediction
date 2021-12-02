@@ -853,10 +853,8 @@ if True: #RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
-# from pyspark.ml.feature import MinMaxScaler
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.feature import StandardScaler
-# from pyspark.ml.feature import RobustScaler
 
 pipeline_steps = list()
 
