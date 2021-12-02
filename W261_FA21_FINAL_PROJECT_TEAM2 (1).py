@@ -150,7 +150,54 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
 # MAGIC 
 # MAGIC ## Performance & Evaluation Metrics
 # MAGIC 
-# MAGIC Goes here
+# MAGIC The buisness case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rational is supported by the theory that a pasenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passanger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. 
+# MAGIC 
+# MAGIC This translates into an emphasized adversion to false positives over false negatives. However, we intend to build a prediction model to perform well in both contexts. As such we will use f-beta as our primary evaluation metric. F-beta is similar to F1-score, in that it takes into account both the recall and precision of the model, but f-beta takes a parameter, beta, to tune the sensitivity towards either precision or recall. The equaiton for f-beta is shown below:
+# MAGIC 
+# MAGIC \\( FBeta = \frac{(1+ \beta^2)\bullet Precision \bullet Recall}{\beta^2 \bullet Precision \bullet Recall}\\)
+# MAGIC 
+# MAGIC \\(\beta\\) 
+# MAGIC is a parameter to be specified based on which is more important to the application, precision or recall. Commonly, if precision is to be emphasized then \\(\beta = 0.5\\) and if recall is to be emphasized \\(\beta = 2.0\\).
+# MAGIC 
+# MAGIC The equations for precision and recall are shown below, where FP = false positives, FN = false negatives, TP = true positives, and TN = true negatives.
+# MAGIC 
+# MAGIC \\(Precision = \frac{TP}{TP + FP} \\)  
+# MAGIC 
+# MAGIC \\(Recall = \frac{TP}{TP + FN}\\)
+# MAGIC 
+# MAGIC 
+# MAGIC In this context we are more adverse to false positives. Given the equations for precision and recall above, it is apparent that Precision must be emphasized in this context. Our implementation of F-Beta will therefore use \\(\beta = 0.5\\).
+# MAGIC 
+# MAGIC 
+# MAGIC Our Implemenation for F-Beta is in the cell below:
+
+# COMMAND ----------
+
+def f_beta(prediction_df, beta = 0.5):
+  """ 
+  F-Beta implementation with beta = 0.5 to emphasize precision (avoid false positives)
+  
+  prediction_df - dataframe with predictions generated in 'prediction' and ground truth in 'dep_del15'
+  
+  f_beta - float value of f_beta score
+  
+  """
+
+  # True Positives:
+  tp = prediction_df.where('dep_del15 = 1.0').where('prediction = 1.0').count()
+  # False Positives:
+  fp = prediction_df.where('dep_del15 = 0.0').where('prediction = 1.0').count()
+  # True Negatives:
+  tn = prediction_df.where('dep_del15 = 0.0').where('prediction = 0.0').count()
+  # False Negatives:
+  fn = prediction_df.where('dep_del15 = 1.0').where('prediction = 0.0').count()
+  # Precision:
+  precision = tp / (tp + fp)
+  # Recall:
+  recall = tp / (tp + fn)
+  # F-Beta:
+  f_beta = (1 + beta**2) * ((precision * recall) / ((beta**2 * precision) + recall))
+  return f_beta
 
 # COMMAND ----------
 
