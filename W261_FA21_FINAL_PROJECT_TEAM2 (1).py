@@ -112,7 +112,7 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
 # MAGIC 
 # MAGIC ## Business Case
 # MAGIC 
-# MAGIC Business case goes here
+# MAGIC In business, time is money and unexpected delays mean unexpected costs. CAL Airlines & Freight  
 
 # COMMAND ----------
 
@@ -120,7 +120,7 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
 # MAGIC 
 # MAGIC ## Stakeholders
 # MAGIC 
-# MAGIC Stakeholders case go here
+# MAGIC In business, time is money and unexpected delays 
 
 # COMMAND ----------
 
@@ -226,7 +226,9 @@ else:
   df_airports = spark.read.parquet(f'{blob_url}/df_airports/')
 
 df_airports = df_airports.select('name', 'iata', 'icao', 'lat', 'lon', 'timezone', sf.col('utc_offset').cast(IntegerType())) \
-                         .filter((df_airports.country == 'United States') & (df_airports.type == 'airport') & (df_airports.utc_offset.isNotNull()))
+                         .filter((df_airports.country == 'United States') & 
+                                 (df_airports.type == 'airport') & 
+                                 (df_airports.utc_offset.isNotNull()))
 
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_airports, sample_fraction=1.0)
@@ -391,8 +393,8 @@ df_valid_flights = df_flights.where((df_flights.cancelled == 0) & # flight hasn'
                                     (df_flights.arr_time.isNotNull()) & # flight has an arrival time 
                                     (df_flights.tail_num.isNotNull()) & # flight has a tail number
                                     (df_flights.air_time > 30) & # flight was in the air more than 30 minutes
-                                    (df_flights.dep_delay.isNotNull()) &
-                                    (df_flights.arr_delay.isNotNull())
+                                    (df_flights.dep_delay.isNotNull()) & # departure delay was indicated
+                                    (df_flights.arr_delay.isNotNull()) # arrival delay was indicated
                                    )
 
 window = Window.partitionBy('tail_num', 'fl_date', 'origin_airport_id').orderBy(sf.col('crs_dep_time').desc())
@@ -463,12 +465,6 @@ windowSpec = Window.partitionBy('tail_num', 'fl_date').orderBy(sf.col('dep_datet
 
 for previous_flight_feature in previous_flight_features:
   df_valid_flights = df_valid_flights.withColumn(f'previous_flight_{previous_flight_feature}', sf.lag(previous_flight_feature, 1).over(window))
-
-# COMMAND ----------
-
-if RENDER_EDA_TABLES:
-  html, _ = generate_eda_table(df_valid_flights, 0.001, df_flights_fields)
-  displayHTML(html)
 
 # COMMAND ----------
 
@@ -593,12 +589,7 @@ df_weather_summary = df_weather.withColumn('aggregated_datetime',
                                            seconds_window.cast(TimestampType())).groupBy('station_id', 
                                                                                          'aggregated_datetime').agg(*expressions)
 
-# numeric_weather_agg_features = [f'{feature}_{func}' for feature in numeric_weather_features for func in ['mean', 'min', 'max']]
-# imputer = Imputer(inputCols=numeric_weather_agg_features, outputCols=numeric_weather_agg_features).setStrategy("mean")
-# df_weather_summary = imputer.fit(df_weather_summary).transform(df_weather_summary)
-
 df_weather_summary = df_weather_summary.cache()
-
 
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_weather_summary, 0.002, df_weather_fields)
@@ -797,14 +788,6 @@ df_joined = df_joined.na.fill(value=0, subset=zero_fills)
 
 # COMMAND ----------
 
-numerical_features = [column_name for column_name, column_type in df_joined.dtypes 
-                      if str(column_type) == 'double' or str(column_type) == 'integer']
-
-for numerical_feature in numerical_features:
-  df_joined = df_joined.withColumn(f'{numerical_feature}_log', sf.log10(numerical_feature))
-
-# COMMAND ----------
-
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Load or Persist Final Dataset
@@ -819,6 +802,8 @@ if INITIALIZE_DATASETS:
 
 print('loading from storage...')
 df_joined = spark.read.parquet(f'{blob_url}/df_joined_final/*')
+
+print(df_joined.count())
   
 if RENDER_EDA_TABLES:
   
@@ -827,18 +812,6 @@ if RENDER_EDA_TABLES:
 
   df_joined_sample.hist(figsize=(35,35), bins=15)
   plt.show()    
-
-# COMMAND ----------
-
-print(df_joined.count())
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-
 
 # COMMAND ----------
 
