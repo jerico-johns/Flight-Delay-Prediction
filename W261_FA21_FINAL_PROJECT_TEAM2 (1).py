@@ -153,7 +153,7 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
 # MAGIC 
 # MAGIC [Source](https://machinelearningmastery.com/fbeta-measure-for-machine-learning/)
 # MAGIC 
-# MAGIC The buisness case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rational is supported by the theory that a pasenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passanger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. 
+# MAGIC The buisness case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rationale is supported by the theory that a pasenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passanger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. 
 # MAGIC 
 # MAGIC This translates into an emphasized adversion to false positives over false negatives. However, we intend to build a prediction model to perform well in both contexts. As such we will use f-beta as our primary evaluation metric. F-beta is similar to F1-score, in that it takes into account both the recall and precision of the model, but f-beta takes a parameter, beta, to tune the sensitivity towards either precision or recall. The equaiton for f-beta is shown below:
 # MAGIC 
@@ -827,6 +827,7 @@ split_feature = 'crs_dep_datetime_utc'
 categorical_features = list({'dest',
                         'origin',
                         'op_unique_carrier',
+                        'year', 
                         'month',
                         'day_of_week',
                         'previous_flight_origin_airport_id'})
@@ -879,6 +880,11 @@ if True: #RENDER_EDA_TABLES:
 
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.feature import StandardScaler
+from pyspark.sql.functions import when
+
+# Separate our training data (pre-2019) and blind test data (2019), which we will use in final step for testing. 
+df_raw_features_train = df_raw_features.where("year < 2019").cache()
+df_raw_features_test = df_raw_features.where("year >= 2019").cache()
 
 pipeline_steps = list()
 
@@ -902,20 +908,19 @@ assemblerInputs = [f'{feature}_oh' for feature in categorical_features] + ['scal
 assembler = VectorAssembler(inputCols=assemblerInputs, outputCol='features')
 pipeline_steps += [assembler]
 
-train_model = Pipeline(stages=pipeline_steps).fit(df_raw_features).transform(df_raw_features)
+featureTransform = Pipeline(stages=pipeline_steps).fit(df_raw_features_train)
+
+train_model = featureTransform.transform(df_raw_features_train)
+test_model = featureTransform.transform(df_raw_features_test)
 
 train_model
 
 # COMMAND ----------
 
-# Add a fold column and fold numbers. For each fold (i / 2) training will be fold i, validation i + 1. 
-from pyspark.sql.functions import when
-# Separate our training data (pre-2019) and blind test data (2019), which we will use in final step for testing. 
-train_model = train_model.where("year < 2019").cache()
-test_model = train_model.where("year = 2019").cache()
 # Add percent rank to aid in cross validation/splitting
 train_model = train_model.withColumn('rank', sf.percent_rank().over(Window.partitionBy().orderBy('crs_dep_datetime_utc')))
 # Get 10 folds (20 train + val splits) to generate distribution for statistical testing. 
+# Cache for faster access times. 
 train_model = train_model.withColumn("foldNumber", when((train_model.rank < .07), lit(0)) \
                                            .when((train_model.rank < .1), lit(1)) \
                                            .when((train_model.rank < .17), lit(2)) \
@@ -935,7 +940,11 @@ train_model = train_model.withColumn("foldNumber", when((train_model.rank < .07)
                                            .when((train_model.rank < .87), lit(16)) \
                                            .when((train_model.rank < .9), lit(17)) \
                                            .when((train_model.rank < .97), lit(18)) \
-                                           .otherwise(lit(19)))
+                                           .otherwise(lit(19))).cache()
+
+# COMMAND ----------
+
+train_model.sample(fraction=0.0001).toPandas()
 
 # COMMAND ----------
 
@@ -973,7 +982,7 @@ from pyspark.ml.tuning import TrainValidationSplit, ParamGridBuilder
 # COMMAND ----------
 
 # TEMPORARY: Downsize train_model for iterations
-train_model_small = train_model.sample(0.0001).cache()
+train_model_small = train_model.sample(0.2).cache()
 validation_data_small = train_model_small.where("foldNumber % 2 != 0")
 
 # COMMAND ----------
@@ -2578,14 +2587,14 @@ def compareBaselines(model = None, model_name = None, features = None, paramGrid
   else:
     pipeline = Pipeline(stages=[model])
     f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction', metricName='f1', beta = 0.5)
-    cv = CrossValidator(estimator=pipeline, estimatorParamMaps=paramGrid, evaluator=f_beta, numFolds = 10, parallelism=16, foldCol = 'foldNumber', collectSubModels = True)
-    cvModel = cv.fit(train_model_small)
+    cv = CrossValidator(estimator=pipeline, estimatorParamMaps=paramGrid, evaluator=f_beta, numFolds = 10, parallelism=35, foldCol = 'foldNumber', collectSubModels = False)
+    cvModel = cv.fit(train_data)
     bestModel = cvModel.bestModel
     # Get average of performance metric (F-beta) for best model 
     f_beta_score = cvModel.avgMetrics[0]
     #Get standard deviation of performance metric (F-beta) for best model
     stdDev = cvModel.stdMetrics[0]
-    return [model_name, bestModel, features, f_beta_score, stdDev,paramGrid]
+    return [model_name, bestModel, features, f_beta_score, stdDev, paramGrid]
 
 # COMMAND ----------
 
@@ -2622,61 +2631,88 @@ def statisticalTestModels(df = None):
 # COMMAND ----------
 
 # Set value for number of params to randomly select for each parameter. 
-NUM_PARAM_VALUES = 2
+NUM_PARAM_VALUES = 3
 
 # Define baseline models to compare. 
 ### 1.) Logistic Regression ###
 lr_model = LogisticRegression(featuresCol = 'features', labelCol='dep_del15', maxIter=20)
 
 # LR Param Grid
+# lr_paramGrid = ParamGridBuilder() \
+#     .addGrid(lr_model.regParam, random.sample(list(np.linspace(0,1,11)), NUM_PARAM_VALUES)) \
+#     .build()
 lr_paramGrid = ParamGridBuilder() \
-    .addGrid(lr_model.regParam, random.sample(list(np.linspace(0,1,11)), NUM_PARAM_VALUES)) \
+    .addGrid(lr_model.regParam, [0.5,1.0]) \
     .build()
 
 ### 2.) Support Vector Classifier ###
 svc_model = LinearSVC(featuresCol = 'features', labelCol='dep_del15', maxIter=20)
 
 # SVC Param Grid
-svc_paramGrid = ParamGridBuilder() \
-    .addGrid(svc_model.regParam, random.sample(list(np.linspace(0,1,11)), NUM_PARAM_VALUES)) \
-    .addGrid(svc_model.fitIntercept, random.sample([True, False], NUM_PARAM_VALUES)) \
-    .addGrid(svc_model.standardization, random.sample([True, False], NUM_PARAM_VALUES)) \
-    .build()
+# svc_paramGrid = ParamGridBuilder() \
+#     .addGrid(svc_model.regParam, random.sample(list(np.linspace(0,1,11)), NUM_PARAM_VALUES)) \
+#     .addGrid(svc_model.fitIntercept, random.sample([True, False], NUM_PARAM_VALUES)) \
+#     .addGrid(svc_model.standardization, random.sample([True, False], NUM_PARAM_VALUES)) \
+#     .build()
 
 ### 3.) Decision Tree Classifier ###
 dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15', maxDepth = 10)
 
 # DT Param Grid
+# dt_paramGrid = ParamGridBuilder() \
+#     .addGrid(dt_model.maxDepth, random.sample(list(np.linspace(0,20,11)), NUM_PARAM_VALUES)) \
+#     .build()
+
 dt_paramGrid = ParamGridBuilder() \
-    .addGrid(dt_model.maxDepth, random.sample(list(np.linspace(0,20,11)), NUM_PARAM_VALUES)) \
+    .addGrid(dt_model.impurity, ['gini','entropy']) \
+    .addGrid(dt_model.maxDepth, [1]) \
     .build()
+
+# .addGrid(dt_model.minInfoGain, random.sample(list(np.linspace(0,1,20)), NUM_PARAM_VALUES)) \
+    
 
 ### 4.) Gradient Boosted Tree Classifier ###
 gbt_model = GBTClassifier(featuresCol = 'features', labelCol='dep_del15', maxIter = 20)
 
 # GBT Param Grid
+# gbt_paramGrid = ParamGridBuilder() \
+#     .addGrid(gbt_model.stepSize, random.sample(list(np.linspace(0.1,1,11)), NUM_PARAM_VALUES)) \
+#     .build()
+
 gbt_paramGrid = ParamGridBuilder() \
-    .addGrid(gbt_model.stepSize, random.sample(list(np.linspace(0.1,1,11)), NUM_PARAM_VALUES)) \
+    .addGrid(gbt_model.impurity, ['variance', 'variance']) \
     .build()
+
 
 ### 5.) Random Forest Classifier ###
 rf_model = RandomForestClassifier(featuresCol = 'features', labelCol='dep_del15', numTrees = 10)
 
 # RF Param Grid
+# rf_paramGrid = ParamGridBuilder() \
+#     .addGrid(rf_model.maxDepth, random.sample(list(np.linspace(0,20,11)), NUM_PARAM_VALUES)) \
+#     .build()
 rf_paramGrid = ParamGridBuilder() \
-    .addGrid(rf_model.maxDepth, random.sample(list(np.linspace(0,20,11)), NUM_PARAM_VALUES)) \
+    .addGrid(rf_model.impurity, ['gini', 'entropy']) \
     .build()
+
 
 #Multilayer perceptron
 # layers = [4, 5, 4, 3]
 # mlpc_model = MultilayerPerceptronClassifier(maxIter=10, layers=layers, blockSize=128, seed=1234)
 
 #Create a list with model, model_name to iterate through comparisons. 
-modelList = [(None, "Majority Class", None), 
-             (lr_model, "Logistic Regression", lr_paramGrid),
-             (dt_model, "Decision Tree", dt_paramGrid),
-             (gbt_model, "Gradient Boosted Tree", gbt_paramGrid),
-             (rf_model, "Random Forest", rf_paramGrid)]
+# modelList = [(dt_model, "Decision Tree", dt_paramGrid)]
+# modelList = [(lr_model, "Logistic Regression", lr_paramGrid)]
+modelList = [(rf_model, "Random Forest", rf_paramGrid)]
+# modelList = [(gbt_model, "Gradient Boosted Tree", gbt_paramGrid)]
+# modelList = [(None, "Majority Class", None)]
+
+             
+# modelList = [(None, "Majority Class", None), 
+#              (lr_model, "Logistic Regression", lr_paramGrid),
+#              (dt_model, "Decision Tree", dt_paramGrid),
+#              (gbt_model, "Gradient Boosted Tree", gbt_paramGrid),
+#              (rf_model, "Random Forest", rf_paramGrid)]
 
 # COMMAND ----------
 
@@ -2735,7 +2771,7 @@ plt.show()
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Decision Tree Explination and Toy Example:  
+# MAGIC ### Decision Tree Explanation and Toy Example:  
 # MAGIC [Source](https://towardsdatascience.com/a-dive-into-decision-trees-a128923c9298)
 # MAGIC 
 # MAGIC Decision Trees operate by selecting the optimal features to split the data. The data is split either until a pre-definened parameter is met, like maximum depth or minimum information gain, or until the data is perfectly split. The nodes of a tree represent a feature the data is split on, each node will have a branch that either leads to another node where another split takes place, or to a leaf which represents the decision the tree arrives at. Decision Trees can be used in both classification and regression, in this project we are working on classifying if a plane is delayed greater than 15 minutes or not, so we will focus on classification.
