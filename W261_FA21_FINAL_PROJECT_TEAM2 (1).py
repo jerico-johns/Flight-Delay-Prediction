@@ -583,7 +583,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Weather Data Aggregation
 # MAGIC 
-# MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. 
+# MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. This aggregation allows us to match weather data to flight data.
 
 # COMMAND ----------
 
@@ -617,18 +617,23 @@ if RENDER_EDA_TABLES:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Join Flight Data to Weather Data
+# MAGIC 
+# MAGIC Finally we join the historical flight data with XXXXXX rows to the weather data with YYYYYY rows. 
 
 # COMMAND ----------
 
-# Window the data by the 
+# Window the data by the scheduled departure date into 30-minute buckets. 
 seconds_window = sf.from_unixtime(sf.unix_timestamp('crs_dep_datetime_utc') - sf.unix_timestamp('crs_dep_datetime_utc') % WEATHER_AGGREGATE_WINDOW_SECONDS)
 
+# Match the bucketed weather datetime with the bucketed scheduled departure date subtracted by two hours. We perform a left-join, rather than inner, so as to keep flights that don't have corresponding weather data. 
 df_joined = df_valid_flights.withColumn('aggregated_datetime', seconds_window.cast(TimestampType()) - sf.expr("INTERVAL 2 HOURS")).join(
   df_weather_summary.withColumn('origin_station_id', sf.col('station_id')),
   on=['origin_station_id', 'aggregated_datetime'], how='left'
 )
 
 # COMMAND ----------
+
+# There are several features that are 100% NULL or would not be known two hours before a departure, we eliminate those features to reduce complexity.
 
 junk_features = {
     'cancellation_code',
@@ -696,6 +701,8 @@ df_joined = df_joined.drop(*junk_features)
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Balance the Dataset
+# MAGIC 
+# MAGIC The dataset contains MANY more flights that are not delayed by 15 minutes or more than flights that are, so for the training set we balance the examples for both so the model does not become overfit.
 
 # COMMAND ----------
 
@@ -714,6 +721,8 @@ df_joined = df_negative_sample.union(df_positive_sample)
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Impute missing weather features
+# MAGIC 
+# MAGIC There are XXXXX flights that do not contain weather information, however, we do not wish to exclude these. Rather than setting the NULLs to zero, which for some features be an extreme value, we set the NULLs to the mean.
 
 # COMMAND ----------
 
@@ -752,6 +761,8 @@ if RENDER_EDA_TABLES:
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Day of Year
+# MAGIC 
+# MAGIC Day of the 
 
 # COMMAND ----------
 
