@@ -767,7 +767,7 @@ def udf_calculate_previous_flight_delay(previous_scheduled_elapsed_time, previou
 
 df_joined = df_joined.withColumn('previous_flight_dep_delay_new_2', 
                                   udf_calculate_previous_flight_delay('previous_flight_crs_elapsed_time', 'previous_flight_dep_delay_new').cast(DoubleType()))
-  
+#TODO: Add back previous_flight_crs_elapsed_time
 
 # COMMAND ----------
 
@@ -944,6 +944,7 @@ train_model = train_model.withColumn("foldNumber", when((train_model.rank < .07)
 
 # COMMAND ----------
 
+#Check that everything is working as intended (i.e. no data leakage, foldNumbers correctly allocated, features transformed appropriately, etc.)
 train_model.sample(fraction=0.0001).toPandas()
 
 # COMMAND ----------
@@ -981,8 +982,30 @@ from pyspark.ml.tuning import TrainValidationSplit, ParamGridBuilder
 
 # COMMAND ----------
 
-# TEMPORARY: Downsize train_model for iterations
-train_model_small = train_model.sample(0.2).cache()
+# MAGIC %md Define Experimental Framework Constraints, based on performance limitations observed on results here: https://docs.google.com/spreadsheets/d/1aqF0zf6Fm9QCM_mi0E-NS_F1LLFPrZAXy-ICT6-ycn4/edit?usp=sharing
+
+# COMMAND ----------
+
+# Ideal parallelism param for CV observed to be 35 for our cluster. 
+PARELLELISM = 35
+
+# Ideal number of PCA features observed to be 5, given just 5 features explain ~100% of variance. 
+PCA_FEATURES = 5 
+
+# Assuming 2 hyperparameters to search over, we limit ourselves to 2 values for each, 
+# given an optimal param search of 4, given our parallelism and config. 
+NUM_PARAM_VALUES = 2
+
+# Ideal sample size observed to be 20% for our experimentation framework, given time constraint of less than 120 minutes for model selection. 
+SAMPLE_SIZE = 0.0001
+
+# Must constrain max_tree_depth param value to 4, given linear scaling of runtime after this depth. 
+MAX_TREE_DEPTH = 4
+
+# COMMAND ----------
+
+# Downsize train_model to ideal sample size specified above. 
+train_model_small = train_model.sample(SAMPLE_SIZE).cache()
 validation_data_small = train_model_small.where("foldNumber % 2 != 0")
 
 # COMMAND ----------
@@ -2572,21 +2595,22 @@ class TrainValidationSplitModel(Model, _TrainValidationSplitParams, MLReadable, 
 
 # COMMAND ----------
 
-def compareBaselines(model = None, model_name = None, features = None, paramGrid = None, train_data = train_model_small, validation_data = validation_data_small):  
+def compareBaselines(model = None, model_name = None, features = None, paramGrid = None, train_data = train_model_small, validation_data = validation_data_small, test_data = False):  
   '''Baseline model comparison: Similiar to the custom tuning function, this function will take a model, a feature list, training data, validation data. It will train and test the model, appending the modelName, modelObject, featuresList, precision score (i.e. the model precision score) to a list of lists to use for comparison. If model is None, predict never delayed as our 'null hypothesis' comparison.'''
   #If no model is passed, predict the majority class for our validation data (the odd numbered fold numbers in our foldCol). 
   if model is None: 
     #Append 0.0 literal to evaluation data as "prediction". 
     predictions = validation_data.withColumn('prediction_majority', f.lit(0.0))
-    f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction_majority', metricName='f1', beta = 0.5)
+    f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction_majority', metricName='f1', beta = 0.5, metricLabel = 1)
     f_beta_score = f_beta.evaluate(predictions)
     #TODO: Calculate actual std. dev in fbeta across folds. 
     stdDev = 0.0
+    bestParams = None
     #Note we pass the paramGrid object with the baseline model so that we can easily extract the paramGrid to use for best model. 
-    return [model_name, model, features, f_beta_score, stdDev, paramGrid]
+    return [model_name, model, features, f_beta_score, stdDev, paramGrid, bestParams]
   else:
     pipeline = Pipeline(stages=[model])
-    f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction', metricName='f1', beta = 0.5)
+    f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction', metricName='f1', beta = 0.5, metricLabel = 1)
     cv = CrossValidator(estimator=pipeline, estimatorParamMaps=paramGrid, evaluator=f_beta, numFolds = 10, parallelism=35, foldCol = 'foldNumber', collectSubModels = False)
     cvModel = cv.fit(train_data)
     bestModel = cvModel.bestModel
@@ -2594,7 +2618,9 @@ def compareBaselines(model = None, model_name = None, features = None, paramGrid
     f_beta_score = cvModel.avgMetrics[0]
     #Get standard deviation of performance metric (F-beta) for best model
     stdDev = cvModel.stdMetrics[0]
-    return [model_name, bestModel, features, f_beta_score, stdDev, paramGrid]
+    #Get the best params
+    bestParams = cvModel.getEstimatorParamMaps()[ np.argmax(cvModel.avgMetrics) ]
+    return [model_name, cvModel, features, f_beta_score, stdDev, paramGrid, bestParams]
 
 # COMMAND ----------
 
@@ -2623,55 +2649,29 @@ def statisticalTestModels(df = None):
 
 
   df['p_value_to_prev'] = p_value_to_prev
+  return df
 
 # COMMAND ----------
 
-# MAGIC %md 2.) Define baseline models and their hyperparam grids.
+# MAGIC %md 2.) Define baseline models and their hyperparam grids for non-random grid search. Consistent hyperparams across models ensures valid experimental framework. 
 
 # COMMAND ----------
 
-# Set value for number of params to randomly select for each parameter. 
-NUM_PARAM_VALUES = 3
+# Manually define non-random search space. This ensures data and params are controlled for in our experimental comparisons, yielding valid results. 
+MIN_INFO_GAIN_SEARCH_LIST = [0.0, 0.2]
+MAX_DEPTH_SEARCH_LIST = [2, 4]
 
-# Define baseline models to compare. 
-### 1.) Logistic Regression ###
-lr_model = LogisticRegression(featuresCol = 'features', labelCol='dep_del15', maxIter=20)
-
-# LR Param Grid
-# lr_paramGrid = ParamGridBuilder() \
-#     .addGrid(lr_model.regParam, random.sample(list(np.linspace(0,1,11)), NUM_PARAM_VALUES)) \
-#     .build()
-lr_paramGrid = ParamGridBuilder() \
-    .addGrid(lr_model.regParam, [0.5,1.0]) \
-    .build()
-
-### 2.) Support Vector Classifier ###
-svc_model = LinearSVC(featuresCol = 'features', labelCol='dep_del15', maxIter=20)
-
-# SVC Param Grid
-# svc_paramGrid = ParamGridBuilder() \
-#     .addGrid(svc_model.regParam, random.sample(list(np.linspace(0,1,11)), NUM_PARAM_VALUES)) \
-#     .addGrid(svc_model.fitIntercept, random.sample([True, False], NUM_PARAM_VALUES)) \
-#     .addGrid(svc_model.standardization, random.sample([True, False], NUM_PARAM_VALUES)) \
-#     .build()
-
-### 3.) Decision Tree Classifier ###
-dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15', maxDepth = 10)
+### 1.) Decision Tree Classifier ###
+dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15')
 
 # DT Param Grid
-# dt_paramGrid = ParamGridBuilder() \
-#     .addGrid(dt_model.maxDepth, random.sample(list(np.linspace(0,20,11)), NUM_PARAM_VALUES)) \
-#     .build()
-
 dt_paramGrid = ParamGridBuilder() \
-    .addGrid(dt_model.impurity, ['gini','entropy']) \
-    .addGrid(dt_model.maxDepth, [1]) \
+    .addGrid(dt_model.minInfoGain, MIN_INFO_GAIN_SEARCH_LIST) \
+    .addGrid(dt_model.maxDepth, MAX_DEPTH_SEARCH_LIST) \
     .build()
 
-# .addGrid(dt_model.minInfoGain, random.sample(list(np.linspace(0,1,20)), NUM_PARAM_VALUES)) \
-    
 
-### 4.) Gradient Boosted Tree Classifier ###
+### 2.) Gradient Boosted Tree Classifier ###
 gbt_model = GBTClassifier(featuresCol = 'features', labelCol='dep_del15', maxIter = 20)
 
 # GBT Param Grid
@@ -2680,39 +2680,25 @@ gbt_model = GBTClassifier(featuresCol = 'features', labelCol='dep_del15', maxIte
 #     .build()
 
 gbt_paramGrid = ParamGridBuilder() \
-    .addGrid(gbt_model.impurity, ['variance', 'variance']) \
+    .addGrid(gbt_model.minInfoGain, MIN_INFO_GAIN_SEARCH_LIST) \
+    .addGrid(gbt_model.maxDepth, MAX_DEPTH_SEARCH_LIST) \
     .build()
 
 
-### 5.) Random Forest Classifier ###
-rf_model = RandomForestClassifier(featuresCol = 'features', labelCol='dep_del15', numTrees = 10)
+### 3.) Random Forest Classifier ###
+rf_model = RandomForestClassifier(featuresCol = 'features', labelCol='dep_del15')
 
 # RF Param Grid
-# rf_paramGrid = ParamGridBuilder() \
-#     .addGrid(rf_model.maxDepth, random.sample(list(np.linspace(0,20,11)), NUM_PARAM_VALUES)) \
-#     .build()
 rf_paramGrid = ParamGridBuilder() \
-    .addGrid(rf_model.impurity, ['gini', 'entropy']) \
+    .addGrid(rf_model.minInfoGain, MIN_INFO_GAIN_SEARCH_LIST) \
+    .addGrid(rf_model.maxDepth, MAX_DEPTH_SEARCH_LIST) \
     .build()
 
-
-#Multilayer perceptron
-# layers = [4, 5, 4, 3]
-# mlpc_model = MultilayerPerceptronClassifier(maxIter=10, layers=layers, blockSize=128, seed=1234)
-
-#Create a list with model, model_name to iterate through comparisons. 
-# modelList = [(dt_model, "Decision Tree", dt_paramGrid)]
-# modelList = [(lr_model, "Logistic Regression", lr_paramGrid)]
-modelList = [(rf_model, "Random Forest", rf_paramGrid)]
-# modelList = [(gbt_model, "Gradient Boosted Tree", gbt_paramGrid)]
-# modelList = [(None, "Majority Class", None)]
-
              
-# modelList = [(None, "Majority Class", None), 
-#              (lr_model, "Logistic Regression", lr_paramGrid),
-#              (dt_model, "Decision Tree", dt_paramGrid),
-#              (gbt_model, "Gradient Boosted Tree", gbt_paramGrid),
-#              (rf_model, "Random Forest", rf_paramGrid)]
+modelList = [(None, "Majority Class", None), 
+             (dt_model, "Decision Tree", dt_paramGrid),
+             (gbt_model, "Gradient Boosted Tree", gbt_paramGrid),
+             (rf_model, "Random Forest", rf_paramGrid)]
 
 # COMMAND ----------
 
@@ -2729,7 +2715,10 @@ for model, model_name, paramGrid in modelList:
   modelComparisons.append(compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid))
 
 #model_name[str], model[obj], features[list], precision[float]
-modelComparisonsDF = pd.DataFrame(modelComparisons, columns = ['model_name', 'model_obj','feature_names','f_beta_score', 'f_beta_std_dev', 'paramGrid_obj']).sort_values(by = 'f_beta_score').reset_index(drop=True)
+modelComparisonsDF = pd.DataFrame(modelComparisons, columns = ['model_name', 'model_obj','feature_names','f_beta_score', 'f_beta_std_dev', 'paramGrid_obj', 'bestParams']).sort_values(by = 'f_beta_score').reset_index(drop=True)
+
+# Show results
+modelComparisonsDF['bestParams']
 
 # COMMAND ----------
 
@@ -2737,7 +2726,7 @@ modelComparisonsDF = pd.DataFrame(modelComparisons, columns = ['model_name', 'mo
 
 # COMMAND ----------
 
-statisticalTestModels(modelComparisonsDF)
+modelComparisonsDF = statisticalTestModels(modelComparisonsDF)
 modelComparisonsDF
 
 # COMMAND ----------
@@ -2756,7 +2745,7 @@ for x,y in zip(x,y):
   plt.annotate(label, # this is the text
                  (x,y), # these are the coordinates to position the label
                  textcoords="offset points", # how to position the text
-                 xytext=(0,10), # distance from text to points (x,y)
+                 xytext=(0,15), # distance from text to points (x,y)
                  ha='center')
 plt.xticks(rotation = 90)
 plt.show()
@@ -2941,7 +2930,137 @@ for i in list(toy_df.means[:-1]):
 
 # COMMAND ----------
 
+# MAGIC %md # Final Model Selection and Tuning. 
+# MAGIC 
+# MAGIC Do a random depth-search across our best experimental model, on the full training/validation data to ensure optimal configuration for final train/test. 
 
+# COMMAND ----------
+
+# Logic to select the most performant model along both F-beta and runtime. 
+prev_fbeta = None
+alpha_sig_value = 0.05
+prev_runtime = None
+best_model_index = None
+
+for index, row in modelComparisonsDF.iterrows(): 
+  if index > 0: 
+    #Update current row values
+    current_fbeta = row['f_beta_score']
+    #Current p_value
+    current_p_value = row['p_value_to_prev']
+    #TODO: Substitute runtime column
+    current_runtime = None
+    #If performance is better, with constant or better runtime, select model regardless of significance. 
+    #if current_fbeta > prev_fbeta and current_runtime <= prev_runtime: 
+    #  best_model_index = index
+    #If performance is significantly better, select model regardless of runtime. 
+    if current_fbeta > prev_fbeta and current_p_value < alpha_sig_value: 
+      best_model_index = index
+  else: 
+    # Append null if on first row
+    best_model_index = index
+
+  #Update the previous row values
+  prev_fbeta = row['f_beta_score']
+  prev_runtime = None
+
+
+best_model = modelComparisonsDF["model_obj"][best_model_index]
+best_model_name = modelComparisonsDF["model_name"][best_model_index]
+
+best_model_name
+
+# COMMAND ----------
+
+# MAGIC %md Define the depth-search paramGrids for each of 3 models so the final tuning is automated from experimentation. 
+
+# COMMAND ----------
+
+NUM_PARAM_VALUES = 3
+
+# COMMAND ----------
+
+# MAGIC %md Redefine models, but this time with a random search space, over more values. 
+
+# COMMAND ----------
+
+### 1.) Decision Tree Classifier ###
+dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15')
+
+# DT Param Grid
+final_paramGrid = ParamGridBuilder() \
+    .addGrid(dt_model.minInfoGain, random.sample(list(np.linspace(0,4,5)), NUM_PARAM_VALUES)) \
+    .addGrid(dt_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
+    .build()
+
+
+### 2.) Gradient Boosted Tree Classifier ###
+gbt_model = GBTClassifier(featuresCol = 'features', labelCol='dep_del15', maxIter = 20)
+
+# GBT Param Grid
+gbt_paramGrid = ParamGridBuilder() \
+    .addGrid(gbt_model.minInfoGain, random.sample(list(np.linspace(0,4,5)), NUM_PARAM_VALUES)) \
+    .addGrid(gbt_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
+    .build()
+
+
+### 3.) Random Forest Classifier ###
+rf_model = RandomForestClassifier(featuresCol = 'features', labelCol='dep_del15')
+
+# RF Param Grid
+rf_paramGrid = ParamGridBuilder() \
+    .addGrid(gbt_model.minInfoGain, random.sample(list(np.linspace(0,6,7)), NUM_PARAM_VALUES)) \
+    .addGrid(gbt_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
+    .build()
+
+
+# COMMAND ----------
+
+best_model_name
+
+# COMMAND ----------
+
+# Build our final model to do random depth-search. 
+if best_model_name == 'Random Forest': 
+  best_model = rf_model
+  best_paramGrid = rf_paramGrid
+elif best_model_name == 'Decision Tree': 
+  best_model = dt_model
+  best_paramGrid = dt_paramGrid
+elif best_model_name == 'Gradient Boosted Tree': 
+  best_model = gbt_model
+  best_paramGrid = gbt_paramGrid
+
+bestModelList = [(best_model, best_model_name + ' Full Model', best_paramGrid)]
+
+# COMMAND ----------
+
+
+
+# COMMAND ----------
+
+#Build comparison table. 
+for model, model_name, paramGrid in bestModelList: 
+  model_name, bestModel, features, f_beta_score, stdDev, paramGrid, bestParams = compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid, train_data = train_model_small)
+  a_series = pd.Series([model_name, bestModel, features, f_beta_score, stdDev, paramGrid, bestParams, None], index = modelComparisonsDF.columns)
+  modelComparisonsDF = modelComparisonsDF.append(a_series, ignore_index=True)
+
+modelComparisonsDF
+
+# COMMAND ----------
+
+# MAGIC %md Take the best model, now fully tuned on the full dataset. Fit on the full trainset and test on the full testset. 
+
+# COMMAND ----------
+
+final_params = bestParams
+test_predictions = bestModel.transform(test_model)
+f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction', metricName='f1', beta = 0.5, metricLabel = 1)
+final_f_beta_score = f_beta.evaluate(test_predictions)
+
+a_series = pd.Series([model_name + ' Test Results', bestModel, features, final_f_beta_score, None, None, bestParams, None], index = modelComparisonsDF.columns)
+modelComparisonsDF = modelComparisonsDF.append(a_series, ignore_index=True)
+modelComparisonsDF
 
 # COMMAND ----------
 
