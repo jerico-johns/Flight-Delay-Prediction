@@ -237,6 +237,12 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Airport EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/airports_eda.png?token=AOG7ANSMF7LMYUW3QIUOSQLBWZ7HC)
+
+# COMMAND ----------
+
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Weather Station Data
@@ -250,6 +256,12 @@ df_stations = spark.read.parquet(f"{root_data_path}/stations_data/*")
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_stations, sample_fraction=0.01)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/weather_station_eda.png?token=AOG7ANT4HSUCJXUHFLVG3H3BWZ756)
 
 # COMMAND ----------
 
@@ -303,6 +315,12 @@ else:
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_closest_airport_station, sample_fraction=1.0)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/airport_weather_station_eda.png?token=AOG7ANSBJCPRT4426DDZYZDBW2ALM)
 
 # COMMAND ----------
 
@@ -389,6 +407,12 @@ df_flights = df_flights.toDF(*[c.lower() for c in df_flights.columns])
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_flights, 0.001, df_flights_fields)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/airport_weather_station_eda.png?token=AOG7ANSBJCPRT4426DDZYZDBW2ALM)
 
 # COMMAND ----------
 
