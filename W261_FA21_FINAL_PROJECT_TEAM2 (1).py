@@ -215,6 +215,8 @@ def f_beta(prediction_df, beta = 0.5):
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Airport Data
+# MAGIC 
+# MAGIC The lat/lon locations and timezone information for airports is downloaded from OpenFlights.org. The historical flight data only contains domestic flights so we only keep locations that are in the US, that are an actual sirport, and that have a UTC offset.
 
 # COMMAND ----------
 
@@ -240,6 +242,8 @@ if RENDER_EDA_TABLES:
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Weather Station Data
+# MAGIC 
+# MAGIC The Weather Station dataset contains data about all XXXXX NOAA weather stations.
 
 # COMMAND ----------
 
@@ -254,7 +258,8 @@ if RENDER_EDA_TABLES:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Joining Airports to Weather Stations
-# MAGIC There's a lot of weather stations and a ton of unnecessary data in the weather dataset.
+# MAGIC 
+# MAGIC We are only interested in the weather stations closest to the airports, so we are able to eliminate YY% of the weather stations by joining it to the Airport dataset. The join is more complex than a simple key-based join, we use the distance of the weather station from the airport as the predicate for selecting which weather station is the closest. If an airport does not have a weather station within 5 kilometers then the airport is eliminated from the list of candidate airports because weather is hyperlocal and anything more than 5 kilometers aways will have a minimal effect on the airport's departure. 
 
 # COMMAND ----------
 
@@ -302,7 +307,9 @@ df_closest_airport_station.count()
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ## Historical Flight Data
+# MAGIC ## Historical Flights Dataset
+# MAGIC 
+# MAGIC The Historical Flight dataset contains XXXXXX historical flights from years 20XX to 2019.
 
 # COMMAND ----------
 
@@ -374,6 +381,8 @@ df_flights_fields = {
 }
 
 df_flights = spark.read.parquet(f'{root_data_path}/parquet_airlines_data/*')
+
+# Convert all features to lowercase to reduce confusion
 df_flights = df_flights.toDF(*[c.lower() for c in df_flights.columns])
 
 if RENDER_EDA_TABLES:
@@ -385,6 +394,8 @@ if RENDER_EDA_TABLES:
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Remove Invalid & Duplicate Flights
+# MAGIC 
+# MAGIC Flights that have been cancelled, diverted, lack an arrival time, lack a tail number, have a flight time less than 30 minutes, lack a depature time, or lack an arrival delay are considered invalid and should not be used in the valid datasets. Additionally, flights that have the plane visit the same airport more than once in the same day should be considered duplicates. 
 
 # COMMAND ----------
 
@@ -398,6 +409,7 @@ df_valid_flights = df_flights.where((df_flights.cancelled == 0) & # flight hasn'
                                     (df_flights.arr_delay.isNotNull()) # arrival delay was indicated
                                    )
 
+# Find all duplicate flights by windowing by tail number, flight date, and origin. Sort by the scheduled departure time and only use the latest one
 window = Window.partitionBy('tail_num', 'fl_date', 'origin_airport_id').orderBy(sf.col('crs_dep_time').desc())
 df_valid_flights = df_valid_flights.withColumn('rank', sf.rank().over(window).cast(IntegerType())).filter(sf.col('rank') == 1).drop('rank')
 
@@ -410,6 +422,8 @@ print(f'The original dataset had {pre_filtered_count:,} records, {filtered_count
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Join Flight Data to Weather Station Data
+# MAGIC 
+# MAGIC We join the airport information containing the closest weather station identifier to the historical flight data, this gets us the nearest weather station and UTC offsets for the origin and destination of each historical flight.
 
 # COMMAND ----------
 
@@ -458,6 +472,8 @@ df_valid_flights = df_valid_flights.withColumn('rank', sf.percent_rank().over(Wi
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Previous Flight Data
+# MAGIC 
+# MAGIC We believe that certain pieces of previous flight information for a tail number in the same day, in other words, the previous leg of a multi-leg flight, contains valuable information for predicting late departures. 
 
 # COMMAND ----------
 
@@ -472,6 +488,8 @@ for previous_flight_feature in previous_flight_features:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Weather Data
+# MAGIC 
+# MAGIC The weather data contains XXXXX rows. Some of the data has already been parsed into columns and some of the data that is comma-delimited. Special values in the specific weather aspects mean NULL, those are usually in the form of a series of 9s.
 
 # COMMAND ----------
 
@@ -489,10 +507,6 @@ def udf_get_value(null_value):
 if INITIALIZE_DATASETS:
     
   df_weather = spark.read.parquet(f"{root_data_path}/weather_data/*")
-  
-#   df_weather = df_weather.withColumn('id', sf.concat_ws('-', 'station_id', 'read_date'))
-#   df_weather = df_weather.groupby('id').count()
-#   df_weather = df_weather.filter('count > 1')  
   
   df_weather = df_weather.withColumn("station_id", sf.col("STATION")).join(df_closest_airport_station, on='station_id').select(
     'STATION', # 0
@@ -568,6 +582,8 @@ if RENDER_EDA_TABLES:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Weather Data Aggregation
+# MAGIC 
+# MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. 
 
 # COMMAND ----------
 
@@ -604,6 +620,7 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
+# Window the data by the 
 seconds_window = sf.from_unixtime(sf.unix_timestamp('crs_dep_datetime_utc') - sf.unix_timestamp('crs_dep_datetime_utc') % WEATHER_AGGREGATE_WINDOW_SECONDS)
 
 df_joined = df_valid_flights.withColumn('aggregated_datetime', seconds_window.cast(TimestampType()) - sf.expr("INTERVAL 2 HOURS")).join(
@@ -714,6 +731,7 @@ df_joined = imputer.fit(df_joined).transform(df_joined)
 # COMMAND ----------
 
 if INITIALIZE_DATASETS:
+  dbutils.fs.rm(f"{blob_url}/df_joined", True)
   df_joined.write.mode('overwrite').parquet(f"{blob_url}/df_joined")
 
 df_joined = spark.read.parquet(f'{blob_url}/df_joined/*')
@@ -789,6 +807,14 @@ df_joined = df_joined.na.fill(value=0, subset=zero_fills)
 
 # COMMAND ----------
 
+numerical_features = [column_name for column_name, column_type in df_joined.dtypes 
+                      if str(column_type) == 'double' or str(column_type) == 'integer']
+
+for numerical_feature in numerical_features:
+  df_joined = df_joined.withColumn(f'{numerical_feature}_log', sf.log10(numerical_feature))
+
+# COMMAND ----------
+
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Load or Persist Final Dataset
@@ -799,6 +825,7 @@ df_joined = df_joined.na.fill(value=0, subset=zero_fills)
 # print(df_joined.take(5))
 
 if INITIALIZE_DATASETS:
+  dbutils.fs.rm(f"{blob_url}/df_joined_final", True)
   df_joined.write.mode('overwrite').parquet(f"{blob_url}/df_joined_final")
 
 print('loading from storage...')
