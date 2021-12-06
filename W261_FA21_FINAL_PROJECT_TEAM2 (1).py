@@ -761,7 +761,7 @@ df_joined = df_joined.drop(*junk_features)
 # MAGIC 
 # MAGIC ## Impute missing weather features
 # MAGIC 
-# MAGIC As we an see in aggregated weather EDA table from there are several weather features that have NULL values. Rather than setting the NULLs to zero, which for some features would be an extreme value, we set the NULLs to the mean. 
+# MAGIC As we can see in aggregated weather EDA table from there are several weather features that have NULL values. Rather than setting the NULLs to zero, which for some features would be an extreme value, we set the NULLs to the mean. 
 
 # COMMAND ----------
 
@@ -950,7 +950,7 @@ continuous_features = list({'day_of_month',
 all_features = categorical_features + continuous_features
 all_features.append(target_feature)
 all_features.append(split_feature)
-all_features.append(year_feature)
+# all_features.append(year_feature)
 
 df_raw_features = df_joined.select(*all_features)
 
@@ -959,6 +959,14 @@ df_raw_features = df_raw_features.na.fill(value=0, subset=['previous_flight_dep_
 
 imputer = Imputer(inputCols=continuous_features, outputCols=continuous_features).setStrategy("mean")
 df_raw_features = imputer.fit(df_raw_features).transform(df_raw_features)
+
+if RENDER_EDA_TABLES:
+  
+  html, df_raw_features_sample = generate_eda_table(df_raw_features, 0.001, {})
+  displayHTML(html)
+
+  df_raw_features_sample.hist(figsize=(35,35), bins=15)
+  plt.show()  
 
 # COMMAND ----------
 
