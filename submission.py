@@ -239,7 +239,7 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ![Airport EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/airports_eda.png?token=AOG7ANSMF7LMYUW3QIUOSQLBWZ7HC)
+# MAGIC ![Airport EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_airports.png?token=AOG7ANWUYF467YGCREW6YWLBW2D42)
 
 # COMMAND ----------
 
@@ -261,7 +261,7 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/weather_station_eda.png?token=AOG7ANT4HSUCJXUHFLVG3H3BWZ756)
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_stations.png?token=AOG7ANVSO2VV2R2ZMFXBUL3BW2D56)
 
 # COMMAND ----------
 
@@ -320,7 +320,7 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/airport_weather_station_eda.png?token=AOG7ANSBJCPRT4426DDZYZDBW2ALM)
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_station_airport.png?token=AOG7ANXPAEWB4VKIELP2OJDBW2D6Y)
 
 # COMMAND ----------
 
@@ -412,7 +412,9 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/airport_weather_station_eda.png?token=AOG7ANSBJCPRT4426DDZYZDBW2ALM)
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_flight_1.png?token=AOG7ANSGRYCWHLR7HZRJ2TDBW2EKK)
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_flight_2.png?token=AOG7ANTIGOTBV7VJNDPHVM3BW2EKU)
 
 # COMMAND ----------
 
