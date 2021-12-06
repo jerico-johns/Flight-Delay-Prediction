@@ -147,7 +147,7 @@ notebook_start = time.time()
 # MAGIC 
 # MAGIC ## Goals
 # MAGIC 
-# MAGIC Our goal is to develop a supervised machine learning method for predicting flight delays. A secondary goal is to have the entire pipeline automated so that the best tuned model can be re-selected and re-trained on a weekly cadence to rapidly adjust to changing conditions (e.g. an airport terminal is under delay and an airport specific features becomes relatively more important in a week). This reduces time and computing costs to our Data Scientist team. We define delays as a departure time greater than or equal to 15 minutes from the scheduled departure time. The success of this method will be measured by its ability to balance both false positives and false negatives, with a bias towards avoiding false positives to better serve our customers.
+# MAGIC Our goal is to develop a supervised machine learning method for predicting flight delays. A secondary goal is to have the entire pipeline automated so that the best tuned model can be re-selected and re-trained on a weekly cadence to rapidly adjust to changing conditions (e.g. an airport terminal is under construction and an airport specific features becomes relatively more important in a week). This reduces time and computing costs to our Data Scientist team. We define delays as a departure time greater than or equal to 15 minutes from the scheduled departure time. The success of this method will be measured by its ability to balance both false positives and false negatives, with a bias towards avoiding false positives to better serve our customers (as a missed flight represents a cost of $359, while a 1 hour delay only represents $47 in passenger time). 
 
 # COMMAND ----------
 
@@ -161,9 +161,11 @@ notebook_start = time.time()
 # MAGIC  
 # MAGIC To effectively answer this question, several sub questions must be answered as we evaluate the available data, metrics, and algorithms. A list of such questions is shown below, each of which are answered throughout this project.
 # MAGIC 
-# MAGIC * How can we minimize the rate of false positives, which are more costly to us and our passengers?  
+# MAGIC * How can we minimize the rate of false positives (in 2019 test data), which are more costly to us and our passengers?  
 # MAGIC 
-# MAGIC * How can we handle the large amount of data in a manner that scales efficiently to help solve our problem?  
+# MAGIC * Can we create an automated model selection and tuning process so that a new model can be trained weekly and yield low false-positives in prediction and high scalability in training time? 
+# MAGIC 
+# MAGIC * Similiarly, how can we process and clean the large amount of data in a manner that scales efficiently to help solve our problem?  
 
 # COMMAND ----------
 
@@ -172,7 +174,7 @@ notebook_start = time.time()
 # MAGIC ## Performance & Evaluation Metrics
 # MAGIC 
 # MAGIC 
-# MAGIC The business case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rationale is supported by the theory that a passenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passenger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. However, using a metric that avoids the alternative scenario of excessive false negatives would be detrimental to our operations as an airline.  
+# MAGIC The business case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rationale is supported by the theory that a passenger that is notified a flight is delayed when it is not may miss their flight (cost = $359). Inversely, if a passenger is not notified of a delay when there is one, the outcome is added idle time for the passenger (cost = $47). Our team is operating under the belief that the latter is a prefered failure mode over the prior. However, using a metric that avoids the alternative scenario of excessive false negatives would be detrimental to our operations as an airline.  
 # MAGIC 
 # MAGIC This translates into an emphasized aversion to false positives over false negatives. However, we intend to build a prediction model to perform well in both contexts. As such we will use f-beta as our primary evaluation metric. F-beta is similar to F1-score, in that it takes into account both the recall and precision of the model, however it takes a parameter, beta, to tune the sensitivity towards either precision or recall. The equation for f-beta is shown below [3]:  
 # MAGIC 
@@ -203,7 +205,7 @@ notebook_start = time.time()
 # MAGIC 
 # MAGIC We are supplied with three datasets:
 # MAGIC 
-# MAGIC -	Historical Flights from 20XX to 2019 - contains data such as the origin airport, destination airport, the scheduled flight departure and arrivals in local datetime, the actual flight departures and arrivals in local datetime, and other various summary data such as carrier, cancellations, diversions, etc.
+# MAGIC -	Historical Flights from 2015 to 2019 - contains data such as the origin airport, destination airport, the scheduled flight departure and arrivals in local datetime, the actual flight departures and arrivals in local datetime, and other various summary data such as carrier, cancellations, diversions, etc.
 # MAGIC 
 # MAGIC -	Weather Stations - contains data regarding the lat/lon location of the weather station and a unique identifier.
 # MAGIC 
@@ -422,7 +424,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Remove Invalid & Duplicate Flights
 # MAGIC 
-# MAGIC Flights that have been cancelled, diverted, lack an arrival time, lack a tail number, have a flight time less than 30 minutes, lack a depature time, or lack an arrival delay are considered invalid. Additionally, flights that have the plane visit the same airport more than once in the same day should be considered duplicates. This reduces this dataset from 63,493,682 down to 48,844,778.
+# MAGIC Flights that have been cancelled, diverted, lack an arrival time, lack a tail number, have a flight time less than 30 minutes, lack a depature time, or lack an arrival delay are considered invalid. Additionally, flights that have the plane visit the same airport more than once in the same day should be considered duplicates. This reduces this dataset from 63,493,682 down to 48,844,778 (-23%).
 
 # COMMAND ----------
 
@@ -500,7 +502,7 @@ df_valid_flights = df_valid_flights.withColumn('rank', sf.percent_rank().over(Wi
 # MAGIC 
 # MAGIC ## Previous Flight Data
 # MAGIC 
-# MAGIC We believe that certain pieces of previous flight information for a tail number in the same day, in other words, the previous leg of a multi-leg flight, contains valuable information for predicting late departures. 
+# MAGIC We believe that certain pieces of previous flight information for a tail number in the same day, in other words, the previous leg of a multi-leg flight, contains valuable information for predicting late departures. If an airplane is delayed on one leg, it is highly likely that it will also be delayed on subsequent legs. 
 
 # COMMAND ----------
 
@@ -518,7 +520,7 @@ for previous_flight_feature in previous_flight_features:
 # MAGIC 
 # MAGIC The original weather dataset contains 630,904,436 rows. The fields WND, CIG, VIS, TMP, DEW, and SLP contain comma-delimited information regarding the raw values, qauality of the reading, additional coded values, and "magic" values mean NULL.
 # MAGIC 
-# MAGIC We join the weather data to the just the weather stations that are closest to the airports and we end up with 93,145,915 rows of weather data.
+# MAGIC We join the weather data to the weather stations that are closest to the airports and we end up with 93,145,915 rows of weather data.
 
 # COMMAND ----------
 
@@ -742,7 +744,7 @@ df_joined = df_joined.drop(*junk_features)
 # MAGIC 
 # MAGIC ## Impute missing weather features
 # MAGIC 
-# MAGIC As we can see in aggregated weather EDA table from there are several weather features that have NULL values. Rather than setting the NULLs to zero, which for some features would be an extreme value, we set the NULLs to the mean. 
+# MAGIC As we can see in aggregated weather EDA table there are several weather features that have NULL values. Rather than setting the NULLs to zero, which for some features would be an extreme value, we set the NULLs to the mean. 
 
 # COMMAND ----------
 
@@ -833,7 +835,7 @@ df_joined = df_joined.withColumn('previous_flight_dep_delay_new_2',
 # MAGIC 
 # MAGIC ## Handle NULL values
 # MAGIC 
-# MAGIC Flights that did not have a previous leg will, by defintion, will not be delayed by a previous leg, so we set the `previous_flight_crs_elapsed_time` and `previous_flight_dep_delay_new` features to zero.
+# MAGIC Flights that did not have a previous leg will, by defintion, not be delayed by a previous leg, so we set the `previous_flight_crs_elapsed_time` and `previous_flight_dep_delay_new` features to zero.
 
 # COMMAND ----------
 
@@ -865,6 +867,7 @@ for numerical_feature in numerical_features:
 
 # COMMAND ----------
 
+# If manual variable is set to False, we will simply load the processed parquet file. Set this flag to True for automated runs to regenerate and process new data. 
 if INITIALIZE_DATASETS:
   dbutils.fs.rm(f"{blob_url}/df_joined_final", True)
   df_joined.write.mode('overwrite').parquet(f"{blob_url}/df_joined_final")
@@ -873,7 +876,8 @@ print('loading from storage...')
 df_joined = spark.read.parquet(f'{blob_url}/df_joined_final/*')
 
 print(df_joined.count())
-  
+
+# If set to True, we will generate EDA tables. Only use for non-automated runs when manual exploration and engineering is being done. 
 if RENDER_EDA_TABLES:
   
   html, df_joined_sample = generate_eda_table(df_joined, 0.001, {})
@@ -1013,7 +1017,7 @@ test_model.cache()
 
 # COMMAND ----------
 
-# Define the proportion (to majority class) to resample the undersampled class. Alpha of 1.0 yields 50/50 balance. 
+# Define the proportion (to majority class) to resample the undersampled class. 
 ALPHA = 0.9
 
 positive_sample_count = train_model.filter('dep_del15 == 1').count()
@@ -1066,7 +1070,7 @@ validation_data = train_model.where("foldNumber % 2 != 0")
 
 # COMMAND ----------
 
-# MAGIC %md #### Determine if Logistic Regression Algorithm is valid by using PCA to test that data is linearly separable. 
+# MAGIC %md #### Justify dropping Logistic Regression and focusing on tree models, since PCA shows data is NOT linearly separable. 
 
 # COMMAND ----------
 
@@ -1159,6 +1163,10 @@ pass
 
 # COMMAND ----------
 
+# MAGIC %md Set k = 5 since this elbow point explains ~100% of variance. 
+
+# COMMAND ----------
+
 # Switch back to pyspark PCA. 
 from pyspark.ml.feature import PCA
 
@@ -1186,13 +1194,13 @@ test_model = model.transform(test_model).cache()
 # MAGIC 
 # MAGIC We anticipated these tree based models will perform well as they are able to accommodate non-linearly separable data [7], as is the case here (see Figure: ‘Non-Linearly Separable Features’) . We expected the fastest training time to be achieved with a single decision tree due to the relative simplicity of the algorithm. However, we anticipated that an ensemble method such as random forest or gradient boosted tree may outperform a single decision tree enough to justify the increased training cost. Gradient boosted trees are hypothesized to have the highest performance, but the longest training time.
 # MAGIC 
-# MAGIC To compare models, we implemented an automated experimentation framework on two dimensions: 1.) F-beta performance and 2.) Runtime (i.e. scalability). We operationalized our accepted trade-off between these dimensions by favoring higher F-beta, constrained on runtime. Specifically we only accepted a model as the best model if: 
+# MAGIC To compare models, we implemented an automated experimentation framework on two dimensions: 1.) F-beta performance (beta = 0.5) and 2.) Runtime (i.e. scalability). We operationalized our accepted trade-off between these dimensions by favoring higher F-beta, constrained on runtime. Specifically we only accepted a model as the best model if: 
 # MAGIC 
-# MAGIC 1.) F-beta for a model was a statistically significant improvement upon a lower F-beta, so long as runtime complexity was less than 2x the previous model 
+# MAGIC 1.) F-beta for a model was a statistically significant improvement upon a lower F-beta, so long as runtime complexity was less than 2x the previous model. 
 # MAGIC 
 # MAGIC 2.) F-beta was higher, but not statistically different from the previous model, but runtime complexity was as good as or less than the previous model. 
 # MAGIC 
-# MAGIC To conduct statistical tests between model F-beta performance, we first went under the hood of the ‘pyspark.ml.tuning’ package to create our own custom CrossValidator() class that is valid on Time Series data, given none of the pre-packaged CV options are valid on time series data (specifically they do not preserve the time ordering of data between train / validation folds) [15]. Using this class we were able to manually split our training data into training and validation folds (70% training, 30% validation) over each 10th percentile of scheduled flight departure times (in training data). This is a valid CV strategy for time-series data, and has the benefits of preventing leakage (i.e. we never train on our validation / test data) and providing independent sample observations (a core assumption of a two sample t-test) [20]. We used the mean F-beta performance across folds, and the standard deviation of F-beta performance across folds, to conduct a two sample t-test for means with unequal variances (i.e. Welch’s T-test) [19] to test the null hypothesis that the true population mean of a model with higher F-beta is equal to the true population mean of a model with lower F-beta, using an alpha (significance value) of 5%. This gives us confidence that there is less than a 5% chance that our results are due to chance (i.e. we are confident the population mean of the higher F-beta (sample) model on full data will also be higher than than the lower F-beta (sample) model on full data. 
+# MAGIC To conduct statistical tests between model F-beta performance, we first went under the hood of the ‘pyspark.ml.tuning’ package to create our own custom CrossValidator() class that is valid on Time Series data, given none of the pre-packaged CV options are valid on time series data (specifically they do not preserve the time ordering of data between train / validation folds) [15]. Using this class we were able to manually split our training data into training and validation folds (70% training, 30% validation) over each 10th percentile of scheduled flight departure times (in training data). This "Blocking Time Series Split" (see image below for explanation) is a valid CV strategy for time-series data, and has the benefits of preventing leakage (i.e. we never train on our validation / test data) and providing independent sample observations (a core assumption of a two sample t-test) [20]. We used the mean F-beta performance across folds, and the standard deviation of F-beta performance across folds, to conduct a two sample t-test for means with unequal variances (i.e. Welch’s T-test) [19] to test the null hypothesis that the true population mean of a model with higher F-beta is equal to the true population mean of a model with lower F-beta, using an alpha (significance value) of 5%. This gives us confidence that there is less than a 5% chance that our results are due to chance (i.e. we are confident the population mean of the higher F-beta (sample) model on full data will also be higher than than the lower F-beta (sample) model on full data. 
 # MAGIC Using this methodology we were able to efficiently scan three models, over a 20% sample space of the data, over 4 parameters each (2 params * 2 param values), to pick a final model with the most performant combination of F-beta scores and runtime complexity. In our case, we ended up selecting Gradient Boosted Tree as our best baseline model, given it had the highest F-beta of 0.57 which is statistically significant when compared to the next best model Random Forest (F-beta = 0.55). Although the runtime was the longest (694 seconds in CV), it was less than our threshold of 2x the previous model (RF = 567 seconds). 
 
 # COMMAND ----------
@@ -1267,7 +1275,7 @@ validation_data_small = train_model_small.where("foldNumber % 2 != 0")
 
 # COMMAND ----------
 
-# MAGIC %md Modified code for pyspark.ml.tuning to get a time-series valid, cross-validation class implementation. 
+# MAGIC %md Modified code for pyspark.ml.tuning to get a time-series valid, cross-validation class implementation. Given length of code block, code is hidden in the HTML notebook, but available in our .ipynb notebook. 
 
 # COMMAND ----------
 
@@ -2849,7 +2857,7 @@ class TrainValidationSplitModel(Model, _TrainValidationSplitParams, MLReadable, 
 # COMMAND ----------
 
 def compareBaselines(model = None, model_name = None, features = None, paramGrid = None, train_data = train_model_small, validation_data = validation_data_small, test_data = False):  
-  '''Baseline model comparison: Similiar to the custom tuning function, this function will take a model, a feature list, training data, validation data. It will train and test the model, appending the modelName, modelObject, featuresList, precision score (i.e. the model precision score) to a list of lists to use for comparison. If model is None, predict never delayed as our 'null hypothesis' comparison.'''
+  '''Baseline model comparison: This function will take a model object, a model "nickname", a paramGrid, and optonal args for training data, validation data. It will train and test the model, appending the modelName, modelObject, featuresList, mean F-beta (i.e. the model precision score), standard deviation of F-beta, bestParams object, and runtime and append to a list of lists to use for comparison. If model is None, predict never delayed as our 'null hypothesis' comparison.'''
   #If no model is passed, predict the majority class for our validation data (the odd numbered fold numbers in our foldCol). 
   if model is None: 
     #Start time logging. 
@@ -2943,7 +2951,7 @@ def confusion_matrix(prediction_df, prediction_col, label_col):
 # COMMAND ----------
 
 def pcaFeatureChoice(df = None):   
-  ''' Method to run test on PCA features and normal features. Will return whichever method is preferable
+  ''' Method to run test on PCA features and normal features. Will return whichever set of features is preferable
   given F-beta performance and runtime on 10-fold CV'''
   
   # Manually define non-random search space. This ensures data and params are controlled for in our experimental comparisons, yielding valid results. 
@@ -3446,7 +3454,7 @@ best_model, best_model_name = selectBestModel(modelComparisonsDF)
 
 # COMMAND ----------
 
-# MAGIC %md Define the depth-search paramGrids for each of 3 models so the final tuning is automated from experimentation. 
+# MAGIC %md Define the random-search paramGrids for each of 3 models so the final tuning is automated from experimentation. 
 
 # COMMAND ----------
 
@@ -3557,7 +3565,7 @@ test_predictions.write.mode('overwrite').parquet(f"{blob_url}/test_predictions")
 # MAGIC 
 # MAGIC The model also demonstrates that we achieved our other goal of minimizing false-positives, as our false-positive rate is only 16%, compared to a 23% false negative rate. We also effectively met our business case for our passengers. Assuming $47 per hour of passenger time, and each false negative prediction of flight delay represents 1 hour of lost time, our model would result in 1,079,314 false negatives while a model that predicts no-delay every time (or the absence of any model), would result in 2,383,447 false negatives. This represents a time savings of 1,304,133 passenger hours, or an equivalent $61,294,251 USD.  
 # MAGIC 
-# MAGIC Other learnings and potential directions for future iterations focus largely around scalability. An interesting learning was the susceptibility of our model runtimes (and thus model selection) to regional Cloud demand. During our final training and test run, Cloud resources were hard-capped due to an increased max node capacity for all users in our region. In the absence of cloud resource elasticity, our training was largely being conducted on 2 Virtual Machines (versus the 6 we were planning for). This diminished runtime also washed out efficiency differences between models that we observed under an ideal cluster configuration with 6 workers. Random Forest and Decision Tree took approximately the same amount of time as GBT under the constrained run, when an ideal resource allocation resulted in a 6x runtime advantage to these other models. In light of this, a promising future direction of research is to incorporate the same experimental set-up we used for statistical performance across models (i.e. F-beta scores) with runtime complexity. There is a high likelihood that any one runtime observation of a model is due to chance, and so a sampling method should be implemented to establish a confidence interval in runtime performance differences across models (and time of day or compute demand). 
+# MAGIC Other learnings and potential directions for future iterations focus largely around scalability. An interesting learning was the susceptibility of our model runtimes (and thus model selection) to regional Cloud demand. During our final training and test run, Cloud resources were hard-capped due to an increased max node capacity for all users in our region. In the absence of cloud resource elasticity, our training was largely being conducted on 2 Virtual Machines (versus the 6 we were planning for). This diminished runtime also washed out runtime efficiency differences between models that we observed under an ideal cluster configuration with 6 workers. Random Forest and Decision Tree took approximately the same amount of time as GBT under the constrained run, when an ideal resource allocation resulted in a 6x runtime advantage to these other models. In light of this, a promising future direction of research is to incorporate the same experimental set-up we used for statistical performance across models (i.e. F-beta scores) with runtime complexity. There is a high likelihood that any one runtime observation of a model is due to chance, and so a sampling method should be implemented to establish a confidence interval in runtime performance differences across models (and time of day or compute demand). 
 
 # COMMAND ----------
 
@@ -3635,10 +3643,10 @@ print(f'Total Notebook Elapsed Runtime: {total_notebook_elapsed_time}')
 # MAGIC 
 # MAGIC #### Scalability / Time complexity / I/O vs Memory
 # MAGIC 
-# MAGIC Scalability was a top priority in the development of our algorithm(s) and workflow. We adopted a framework to test for “seamless scalability” via the linear scaling of our algorithms [2] with the number of data elements (rows * features) or model elements (cross-validator models * paramGrid size) in order to constrain our experimental framework for model selection to an optimal set-up for our cluster configuration (6 workers * 4 cores). Results are appended under “Define Experimental Framework Constraints...” section. The primary lever we utilized to adjust the observed scalability, was the CrossValidator parameter ‘parallelism’ [18]. We determined that a parallelism setting of 35, with a paramGrid total size of 4 (2 parameters * 2 parameter values), over four 10-fold cross-validation models trained on the same 20% sample of the full training data, yielded the best compromise between statistical power (to yield valid conclusions regarding the true population means of F-beta performance) and computational runtime. This allowed us to do a wider search over potential models & hyperparam combinations, while yielding F-beta results that gave high enough statistical confidence that the model we selected as best model, was a valid result that would hold on the full dataset.
+# MAGIC Scalability was a top priority in the development of our algorithm(s) and workflow. We adopted a framework to test for “seamless scalability” via the linear scaling of our algorithms [2] with the number of data elements (rows * features) or model elements (cross-validator models * paramGrid size) in order to constrain our experimental framework for model selection to an optimal set-up for our cluster configuration (6 workers x 4 cores). Results are appended under “Define Experimental Framework Constraints...” section. The primary lever we utilized to adjust the observed scalability, was the CrossValidator parameter ‘parallelism’ [18]. We determined that a parallelism setting of 35, with a paramGrid total size of 4 (2 parameters x 2 parameter values), over four 10-fold cross-validation models trained on the same 20% sample of the full training data, yielded the best compromise between statistical power (to yield valid conclusions regarding the true population means of F-beta performance) and computational runtime. This allowed us to do a wider search over potential models & hyperparam combinations, while yielding F-beta results that gave high enough statistical confidence that the model we selected as best model, was a valid result that would hold on the full dataset.
 # MAGIC 
 # MAGIC 
-# MAGIC In the results (under “Define Experimental Framework Constraints...” section), one can observe that data scales approximately linearly (indicating our cluster and infrastructure is scaling “out” as expected). You can also see that the parallelism setting of 35 yielded the best runtime performance on our cluster config, indicating the right balance between data partitioning and shuffling over our cluster, while maximizing the CPU capacity of each worker. In other words, we appropriately scaled “out” over our cluster. The alternative is scaling “up” by overloading a single machine’s resources. A higher parallelism setting (than 35) leads to increasing runtimes, indicating we are creating too much shuffling and communication (i.e. synchronization) costs across our cluster [1]. Communication costs over the network tend to be the most expensive operation in a Map-Reduce framework, so balancing this parameter is a delicate art. By using clusters of cheap commodity computers, Hadoop MapReduce and other parallel frameworks, are able to scale "out" not "up" by leveraging the faster times of memory (RAM) and running all operations locally (using data locality as a core tenant to improve performance) across many machines.
+# MAGIC In the results (under “Define Experimental Framework Constraints...” section), one can observe that data scales approximately linearly (indicating our cluster and infrastructure is scaling “out” as expected). You can also see that the parallelism setting of 35 yielded the best runtime performance on our cluster config, indicating the right balance between data partitioning and shuffling over our cluster, while maximizing the CPU capacity of each worker. In other words, we appropriately scaled “out” over our cluster without shuffling too much data over the network. The alternative is scaling “up” by overloading a single machine’s resources. A higher parallelism setting (than 35) leads to increasing runtimes, indicating we are creating too much shuffling and communication (i.e. synchronization) costs across our cluster [1]. Communication costs over the network tend to be the most expensive operation in a Map-Reduce framework, so balancing this parameter is a delicate art. By using clusters of cheap commodity computers, Apache Spark and other parallel frameworks, are able to scale "out" not "up" by leveraging the faster times of memory (RAM) and running all operations locally (using data locality as a core tenant to improve performance) across many machines.
 # MAGIC 
 # MAGIC 
 # MAGIC #### Data Partitioning & PySpark Windows
@@ -3649,7 +3657,7 @@ print(f'Total Notebook Elapsed Runtime: {total_notebook_elapsed_time}')
 # MAGIC 
 # MAGIC #### Bias Variance Trade-off:
 # MAGIC 
-# MAGIC To find a balance between bias and variance we used a couple techniques in our modeling design. One technique that we used was cross validation, this enables us to gain a performance metric that is less sensitive to the specific folds of the data. We used 10 fold cross validation to generate an average f-beta score across each fold of validation data. Additionally, we used regularization parameters in our models and searched through different levels of these parameters via a grid search. The regularization helps prevent overfitting, which would lead to high variance but low bias. To ensure bias also remains low, we used several models, some of which have a high modeling capacity, such as random forest and gradient boosted trees. These models have a high capacity to model complex decision boundaries and therefore generate a low bias. The challenge here is to maintain a balance between low bias and low variance. The best performance was found by using a model with high modeling capacity, and regularization in the form of limiting the maximum tree depth and minimum information gain. 
+# MAGIC To find a balance between bias and variance we used a couple techniques in our modeling design. One technique that we used was cross validation, this enables us to gain a performance metric that is less sensitive to the specific folds of the data. We used 10 fold cross validation to generate an average f-beta score across each fold of validation data. Additionally, we searched through different levels of these parameters via a grid search to ensure results were not sensitive to the default parameters for any one model. This helped prevent overfitting, which would lead to high variance but low bias. To ensure variance remains low, we used multiple (three) models. However, these models have a high capacity to model complex decision boundaries and potentially overfit, generating high variance. The challenge here is to maintain a balance between low bias and low variance. The best performance was found by using a model with high modeling capacity (Gradient Boosted Tree), and some "regularization" in the form of limiting the maximum tree depth and minimum information gain. 
 # MAGIC 
 # MAGIC 
 # MAGIC #### Model complexity via runtime:
@@ -3658,7 +3666,7 @@ print(f'Total Notebook Elapsed Runtime: {total_notebook_elapsed_time}')
 # MAGIC 
 # MAGIC We used both single decision trees as well as ensemble methods in our modeling experiments. The tradeoff between these models is that while a single decision tree is more performant at scale, ensemble methods tend to generate better accuracy. This tradeoff is compared in our experimental framework such that a more complex model is only selected if the performance is statistically significantly better than the next best model.
 # MAGIC 
-# MAGIC Our experimental framework enables us to search across multiple parameters for each model type, and automatically select a model with the best performance. We only select a better performing model in the case that the f-beta score shows a higher value with statistical significance. Once the best model is selected in the initial param search, a deeper search is conducted on the selected model. This technique was selected due to the infeasibility of running an exhaustive search over each model type. This initial shallow search, followed by a deeper search enables us to select a model that shows a better tendency to fit on our data then fine tune only that model for optimal performance.
+# MAGIC Our experimental framework enables us to search across multiple parameters for each model type, and automatically select a model with the best performance. We only select a better performing model in the case that the f-beta score shows a higher value with statistical significance and runtime is less than 2x the next best model (in terms of F-beta). Once the best model is selected in the initial param search, a deeper search is conducted on the selected model. This technique was selected due to the infeasibility of running an exhaustive search over each model type. This initial shallow search, followed by a deeper search enables us to select a model that shows a better tendency to fit on our data then fine tune only that model for optimal performance (cutting our runtime by ~ 66% given we do not run a full GridSearch across the full training data on 2 of the 3 models). 
 # MAGIC 
 # MAGIC 
 # MAGIC #### Algorithm Assumptions:
