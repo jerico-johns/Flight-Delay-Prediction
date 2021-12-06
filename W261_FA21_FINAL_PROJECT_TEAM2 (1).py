@@ -9,14 +9,9 @@
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ## Presentation	
-# MAGIC - 15 minutes presenting, 5 minutes for Q&A. All team members should speak. You should cover the following points, but try to focus on the most interesting aspects of the project.
-# MAGIC   - Introduce the business case
-# MAGIC   - Introduce the dataset
-# MAGIC   - Summarize EDA and feature engineering
-# MAGIC   - Summarize algorithms tried, and justify final algorithm choice
-# MAGIC   - Discuss evaluation metrics in light of the business case
-# MAGIC   - Discuss performance and scalability concerns
+# MAGIC ## Introduction  
+# MAGIC 
+# MAGIC Our company, C.A.L. Airlines, has been experiencing a high level of customer complaints, and increased cost due to flight delays. As such, we are endeavoring to create a prediction tool that will enable our  customers and operations team to receive advanced notifications about flight delays. To generate these predictions we have acquired two large datasets: flight data from the US Department of Transportation [10], and weather data from the National Oceanic and Atmospheric Administration repository [21].
 
 # COMMAND ----------
 
@@ -113,7 +108,8 @@ notebook_start = time.time()
 # MAGIC %md
 # MAGIC # Question Formulation
 # MAGIC 
-# MAGIC You should refine the question formulation based on the general task description you’ve been given, ie, predicting flight delays. This should include some discussion of why this is an important task from a business perspective, who the stakeholders are, etcz. Some literature review will be helpful to figure out how this problem is being solved now, and the State Of The Art (SOTA) in this domain. Introduce the goal of your analysis. What questions will you seek to answer, why do people perform this kind of analysis on this kind of data? Preview what level of performance your model would need to achieve to be practically useful. Discuss evaluation metrics.
+# MAGIC 
+# MAGIC To narrow the scope of this project, we first evaluate the business case, stakeholders, and existing literature to develop our goals and leading questions for this project.
 
 # COMMAND ----------
 
@@ -121,7 +117,7 @@ notebook_start = time.time()
 # MAGIC 
 # MAGIC ## Business Case
 # MAGIC 
-# MAGIC In business, time is money and unexpected delays mean unexpected costs. CAL Airlines & Freight  
+# MAGIC Our business is looking to generate a simple tool for both internal use as well as customer use. We don’t want to generate predictions for minor delays, which we will consider to be less than 15 minutes, in accordance with the US Department of Transportation [11]. We also want to give our operations team and customers enough warning to effectively react to a potential delay. We therefore are constraining the problem down to predicting delays greater than 15 minutes, 2 hours before a flight. 
 
 # COMMAND ----------
 
@@ -129,15 +125,21 @@ notebook_start = time.time()
 # MAGIC 
 # MAGIC ## Stakeholders
 # MAGIC 
-# MAGIC In business, time is money and unexpected delays 
+# MAGIC There are two primary stakeholders to consider in the development of this delay prediction tool: passengers, and our airline operations team.   
+# MAGIC 
+# MAGIC Passengers are an obvious stakeholder. The relatively high rate of flight delays of approximately 20% leads passengers to plan for excessive amounts of travel time to accommodate interruptions in their itineraries [10]. When these interruptions come up, it can lead to long wait times and missed flights. To contextualize these dimensions, we can assign a value of $47 [9]  to an hour of passenger time and a value of $359 [22] for an average domestic flight in the United States. An accurate tool for predicting flight delays would help passengers better prepare and adjust their itineraries for delays as they happen. Passengers would be specifically interested in a tool that can ensure a minimum amount of false positives, to avoid assuming a flight is delayed when it is on time and potentially missing a flight (representing a cost of $359). Additionally, the tool should yield customer time savings. Compared to the absence of any model, a new model should yield less false-negatives than a model that doesn’t predict any delays (yielding an average $47 in time savings per false negative avoided).   
+# MAGIC 
+# MAGIC Another stakeholder is our operations team. Delayed flights can propagate within an airline's flight network in several ways. A delayed flight may interrupt future flights that the plane or its crew were scheduled for. These delays lead to inefficiencies in airline operations, and fines that add cost. We, as an airline, would be specifically interested in a tool that can generate predictions with a minimum of both false positives and false negatives. This will enable the airline to react to delayed flights, but not waste resources with false positive or false negative predictions. Beyond streamlining business operations and reducing cost, our airline will benefit from the marketing strategy of being seen as a reliable airline. A reduction in flight delays as well as a tool for passengers to get advanced flight delay warnings will help our airline retain and grow our customer base.  
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ## Reviewed Literature
+# MAGIC ## Literature Review
 # MAGIC 
-# MAGIC Goes here
+# MAGIC A literature review to understand the problem domain, and gather background information on the type of frameworks and algorithms used by other researchers was carried out. Carvalho et. al. 2021 [4] is a survey paper that reviews the literature from multiple perspectives, as well as puts forth a well defined problem scope for this domain. The takeaways from this paper can be categorized into impact, data, and methods. The impact this prediction task can have is substantial, with large implications for passengers, airlines, airports and even the environment. Our primary stakeholders as discussed previously will be the passengers and our own airline as that is central to our business case. The data used to solve this problem is a major challenge, largely due to the diversity and enormous scale of the data available. Data acquisition and efficient scalability will be primary concerns as a result. Lastly, the methods used fall into various categories, our research will fall into the domain of machine learning applied to flight prediction. This subfield has leveraged multiple algorithms, including random forests, recommender systems, and reinforcement learning to name a few.  
+# MAGIC 
+# MAGIC Our business case defines our task as a binary classification problem, as such a further review on research that pursues this task was conducted. Rebollo et. al. 2014 [16] evaluates the performance of flight prediction at multiple different time horizons prior to a flight, ranging between 2 and 24 hours before the departure time. A primary task in their research was to use temporal and spatial data, similar to that available to us, to predict delays as a classification and regression task. In their classification task, the best performance achieved was 80.9% with a delay threshold of 60 minutes (delays less than 60min = 0, delays more than 60min = 1) and time horizon of two hours. A more recent study by Gopalakrishnan et. al. 2017 [12] undertook a similar classification task, with a delay threshold of 60 minutes and time horizon of 2 hours. The best performance achieved was 93.6% using a multi-layer perceptron model.
 
 # COMMAND ----------
 
@@ -145,13 +147,23 @@ notebook_start = time.time()
 # MAGIC 
 # MAGIC ## Goals
 # MAGIC 
-# MAGIC Goes here
+# MAGIC Our goal is to develop a supervised machine learning method for predicting flight delays. A secondary goal is to have the entire pipeline automated so that the best tuned model can be re-selected and re-trained on a weekly cadence to rapidly adjust to changing conditions (e.g. an airport terminal is under delay and an airport specific features becomes relatively more important in a week). This reduces time and computing costs to our Data Scientist team. We define delays as a departure time greater than or equal to 15 minutes from the scheduled departure time. The success of this method will be measured by its ability to balance both false positives and false negatives, with a bias towards avoiding false positives to better serve our customers.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC 
 # MAGIC ### Questions to be answered
+# MAGIC 
+# MAGIC The guiding question for this project is as follows:
+# MAGIC 
+# MAGIC Given the massive scale of flight and weather data available, what is the best prediction accuracy we can achieve while balancing scalability concerns?
+# MAGIC  
+# MAGIC To effectively answer this question, several sub questions must be answered as we evaluate the available data, metrics, and algorithms. A list of such questions is shown below, each of which are answered throughout this project.
+# MAGIC 
+# MAGIC * How can we minimize the rate of false positives, which are more costly to us and our passengers?  
+# MAGIC 
+# MAGIC * How can we handle the large amount of data in a manner that scales efficiently to help solve our problem?  
 
 # COMMAND ----------
 
@@ -159,56 +171,25 @@ notebook_start = time.time()
 # MAGIC 
 # MAGIC ## Performance & Evaluation Metrics
 # MAGIC 
-# MAGIC [Source](https://machinelearningmastery.com/fbeta-measure-for-machine-learning/)
 # MAGIC 
-# MAGIC The buisness case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rationale is supported by the theory that a pasenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passanger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. 
+# MAGIC The business case for this project dictates that we should emphasize the avoidance of predicting a flight to be delayed when it is on time over predicting a flight is not delayed when it is. This rationale is supported by the theory that a passenger that is notified a flight is delayed when it is not may miss their flight. Inversely, if a passenger is not notified of a delay when there is one, the outcome is added idle time for the passenger. Our team is operating under the belief that the latter is a prefered failure mode over the prior. However, using a metric that avoids the alternative scenario of excessive false negatives would be detrimental to our operations as an airline.  
 # MAGIC 
-# MAGIC This translates into an emphasized adversion to false positives over false negatives. However, we intend to build a prediction model to perform well in both contexts. As such we will use f-beta as our primary evaluation metric. F-beta is similar to F1-score, in that it takes into account both the recall and precision of the model, but f-beta takes a parameter, beta, to tune the sensitivity towards either precision or recall. The equaiton for f-beta is shown below:
+# MAGIC This translates into an emphasized aversion to false positives over false negatives. However, we intend to build a prediction model to perform well in both contexts. As such we will use f-beta as our primary evaluation metric. F-beta is similar to F1-score, in that it takes into account both the recall and precision of the model, however it takes a parameter, beta, to tune the sensitivity towards either precision or recall. The equation for f-beta is shown below [3]:  
+# MAGIC 
 # MAGIC 
 # MAGIC \\( FBeta = \frac{(1+ \beta^2)\bullet Precision \bullet Recall}{\beta^2 \bullet Precision \bullet Recall}\\)
 # MAGIC 
 # MAGIC \\(\beta\\) 
 # MAGIC is a parameter to be specified based on which is more important to the application, precision or recall. Commonly, if precision is to be emphasized then \\(\beta = 0.5\\) and if recall is to be emphasized \\(\beta = 2.0\\).
 # MAGIC 
-# MAGIC The equations for precision and recall are shown below, where FP = false positives, FN = false negatives, TP = true positives, and TN = true negatives.
+# MAGIC The equations for precision and recall are shown below, where FP = false positives, FN = false negatives, TP = true positives, and TN = true negatives [3].
 # MAGIC 
 # MAGIC \\(Precision = \frac{TP}{TP + FP} \\)  
 # MAGIC 
 # MAGIC \\(Recall = \frac{TP}{TP + FN}\\)
 # MAGIC 
 # MAGIC 
-# MAGIC In this context we are more adverse to false positives. Given the equations for precision and recall above, it is apparent that Precision must be emphasized in this context. Our implementation of F-Beta will therefore use \\(\beta = 0.5\\).
-# MAGIC 
-# MAGIC 
-# MAGIC Our Implemenation for F-Beta is in the cell below:
-
-# COMMAND ----------
-
-def f_beta(prediction_df, beta = 0.5):
-  """ 
-  F-Beta implementation with beta = 0.5 to emphasize precision (avoid false positives)
-  
-  prediction_df - dataframe with predictions generated in 'prediction' and ground truth in 'dep_del15'
-  
-  f_beta - float value of f_beta score
-  
-  """
-
-  # True Positives:
-  tp = prediction_df.where('dep_del15 = 1.0').where('prediction = 1.0').count()
-  # False Positives:
-  fp = prediction_df.where('dep_del15 = 0.0').where('prediction = 1.0').count()
-  # True Negatives:
-  tn = prediction_df.where('dep_del15 = 0.0').where('prediction = 0.0').count()
-  # False Negatives:
-  fn = prediction_df.where('dep_del15 = 1.0').where('prediction = 0.0').count()
-  # Precision:
-  precision = tp / (tp + fp)
-  # Recall:
-  recall = tp / (tp + fn)
-  # F-Beta:
-  f_beta = (1 + beta**2) * ((precision * recall) / ((beta**2 * precision) + recall))
-  return f_beta
+# MAGIC In this context we are more adverse to false positives. Given the equations for precision and recall above, it is apparent that Precision must be emphasized for our use case. Our implementation of F-Beta will therefore use \\(\beta = 0.5\\) [3].
 
 # COMMAND ----------
 
@@ -1195,7 +1176,24 @@ test_model = model.transform(test_model).cache()
 # MAGIC %md
 # MAGIC 
 # MAGIC # Algorithm Exploration
-# MAGIC Apply 2 to 3 algorithms to the training set, and discuss expectations, trade-offs, and results. These will serve as your baselines - do not spend too much time fine tuning these. You will want to use this process to select a final algorithm which you will spend your efforts on fine tuning.
+# MAGIC 
+# MAGIC 
+# MAGIC Our baseline models are decision tree, random forest, and gradient boosted tree. Classification trees have the advantages [7] of being: 
+# MAGIC 
+# MAGIC 1.) Easy to train  
+# MAGIC 2.) Easily interpretable rules  
+# MAGIC 3.) MLLib source code and package for quick implementation  
+# MAGIC 
+# MAGIC We anticipated these tree based models will perform well as they are able to accommodate non-linearly separable data [7], as is the case here (see Figure: ‘Non-Linearly Separable Features’) . We expected the fastest training time to be achieved with a single decision tree due to the relative simplicity of the algorithm. However, we anticipated that an ensemble method such as random forest or gradient boosted tree may outperform a single decision tree enough to justify the increased training cost. Gradient boosted trees are hypothesized to have the highest performance, but the longest training time.
+# MAGIC 
+# MAGIC To compare models, we implemented an automated experimentation framework on two dimensions: 1.) F-beta performance and 2.) Runtime (i.e. scalability). We operationalized our accepted trade-off between these dimensions by favoring higher F-beta, constrained on runtime. Specifically we only accepted a model as the best model if: 
+# MAGIC 
+# MAGIC 1.) F-beta for a model was a statistically significant improvement upon a lower F-beta, so long as runtime complexity was less than 2x the previous model 
+# MAGIC 
+# MAGIC 2.) F-beta was higher, but not statistically different from the previous model, but runtime complexity was as good as or less than the previous model. 
+# MAGIC 
+# MAGIC To conduct statistical tests between model F-beta performance, we first went under the hood of the ‘pyspark.ml.tuning’ package to create our own custom CrossValidator() class that is valid on Time Series data, given none of the pre-packaged CV options are valid on time series data (specifically they do not preserve the time ordering of data between train / validation folds) [15]. Using this class we were able to manually split our training data into training and validation folds (70% training, 30% validation) over each 10th percentile of scheduled flight departure times (in training data). This is a valid CV strategy for time-series data, and has the benefits of preventing leakage (i.e. we never train on our validation / test data) and providing independent sample observations (a core assumption of a two sample t-test) [20]. We used the mean F-beta performance across folds, and the standard deviation of F-beta performance across folds, to conduct a two sample t-test for means with unequal variances (i.e. Welch’s T-test) [19] to test the null hypothesis that the true population mean of a model with higher F-beta is equal to the true population mean of a model with lower F-beta, using an alpha (significance value) of 5%. This gives us confidence that there is less than a 5% chance that our results are due to chance (i.e. we are confident the population mean of the higher F-beta (sample) model on full data will also be higher than than the lower F-beta (sample) model on full data. 
+# MAGIC Using this methodology we were able to efficiently scan three models, over a 20% sample space of the data, over 4 parameters each (2 params * 2 param values), to pick a final model with the most performant combination of F-beta scores and runtime complexity. In our case, we ended up selecting Gradient Boosted Tree as our best baseline model, given it had the highest F-beta of 0.57 which is statistically significant when compared to the next best model Random Forest (F-beta = 0.55). Although the runtime was the longest (694 seconds in CV), it was less than our threshold of 2x the previous model (RF = 567 seconds). 
 
 # COMMAND ----------
 
@@ -3149,22 +3147,24 @@ plotPerformance(modelComparisonsDF, col = 'runtime', title = 'Experimental Runti
 # MAGIC %md
 # MAGIC 
 # MAGIC # Algorithm Implementation
-# MAGIC Create your own toy example that matches the dataset provided and use this toy example to explain the math behind the algorithm that you will perform. Apply your algorithm to the training dataset and evaluate your results on the test set. 
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Decision Tree Explanation and Toy Example:  
-# MAGIC [Source](https://towardsdatascience.com/a-dive-into-decision-trees-a128923c9298)
+# MAGIC ### Model Explanation and Toy Example:
 # MAGIC 
-# MAGIC Decision Trees operate by selecting the optimal features to split the data. The data is split either until a pre-definened parameter is met, like maximum depth or minimum information gain, or until the data is perfectly split. The nodes of a tree represent a feature the data is split on, each node will have a branch that either leads to another node where another split takes place, or to a leaf which represents the decision the tree arrives at. Decision Trees can be used in both classification and regression, in this project we are working on classifying if a plane is delayed greater than 15 minutes or not, so we will focus on classification.
+# MAGIC Each of the models considered in our pipeline are tree based models: Decision Tree, Random forest, and gradient boosted trees. In our final evaluation, a gradient boosted tree model was selected by the pipeline as the best performing model. To give insight into how these models work, we start by providing an explanation of decision trees and an in depth example as to how they function, followed by an explanation of how gradient boosted trees build on the concept of a decision tree.
 # MAGIC 
-# MAGIC When a decision tree splits the data it must determine which feature to split and how to split it optimally. For a split to be optimal, it must maximize the possible information gain. In spark the default implemenation calulates the gini impurity to measure how optimal a split is. The lower the gini impurity, the higher the information gain and the better the split. A pure split with all 0's in one leaf and all 1's in another would have a gini impurity of 0. A perfectly impure split, which results in an equal number of each class in each branch would result in the maximum gini impurity of 0.5 which represents no information gain. 
+# MAGIC ### Decision Trees Explanation and Toy Example:  
+# MAGIC 
+# MAGIC Decision Trees operate by selecting the optimal features to split the data. The data is split either until a predefined parameter is met, like maximum depth or minimum information gain, or until the data is perfectly split. The nodes of a tree represent a feature the data is split on, each node will have a branch that either leads to another node where another split takes place, or to a leaf which represents the decision the tree arrives at. Decision Trees can be used in both classification and regression, in this project we are working on classifying if a plane is delayed greater than 15 minutes or not, so we will focus on classification [17].
+# MAGIC 
+# MAGIC When a decision tree splits the data it must determine which feature to split and how to split it optimally. For a split to be optimal, it must maximize the possible information gain. In spark the default implementation calculates the gini impurity to measure how optimal a split is. The lower the gini impurity, the higher the information gain and the better the split. A pure split with all 0's in one leaf and all 1's in another would have a gini impurity of 0. A perfectly impure split, which results in an equal number of each class in each branch, would result in the maximum gini impurity of 0.5 which represents no information gain [17].
 # MAGIC 
 # MAGIC The equation for gini impurity is:  
 # MAGIC \\(gini\ impurity = 1 - P(class\ 1)^2 - P(class\ 2)^2 \\)
 # MAGIC 
-# MAGIC The above equation is used to determine how to split a given feature optimally. In the case of a categorical feature, the gini impurity is calculated for each branch on each possible split of the feature, we then take the weighted average gini impurity across both branches to determine the overall gini impurity for each split. Below is the equation for the weighted average of gini impurity.
+# MAGIC The above equation is used to determine how to split a given feature optimally. In the case of a categorical feature, the gini impurity is calculated for each branch on each possible split of the feature, we then take the weighted average gini impurity across both branches to determine the overall gini impurity for each split. Below is the equation for the weighted average of gini impurity [17] .
 # MAGIC 
 # MAGIC \\(weighted\ average = \frac{branch\ 1\ count}{total\ count}(branch\ 1\ gini\ impurity) + \frac{branch\ 2\ count}{total\ count}(branch\ 2\ gini\ impurity) \\)
 
@@ -3256,7 +3256,19 @@ print(f'Weighted Gini Impurity for spliting categorical_feature on "b": {cumulat
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC When we split on a continuous feature, the dataframe is sorted by the categorical feature, and the average of every two values is taken. These average values are then consitered as potential split points and the gini impurity is calculated at each potential split point. Below is an example of this.
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_1.PNG?token=ANGE54KNSGCSQLNWS5OVRF3BW6ZXW)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_2.PNG?token=ANGE54IOJAXQJCHZ27BR5IDBW6Z4U)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC When we split on a continuous feature, the data frame is sorted by the categorical feature, and the average of every two values is taken. These average values are then considered as potential split points and the gini impurity is calculated at each potential split point. Below is an example of this.
 
 # COMMAND ----------
 
@@ -3317,9 +3329,40 @@ for i in list(toy_df.means[:-1]):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC After running using the equations detailed above to find the weighted gini impurity at each potential split point of both the categorical and continuous variable, we can see that the optimal split point is the categorical feature, split on 'a' because it results in the lowest gini impurity of 0.199. As a result this feature and split point will be the root (the first split point) of the decision tree. This process will be repeated at each node until 1) there is a pure split, 2) we reach a maximum depth specified as a hyperparameter, or 3) we do not meat a minimum information gain threshold specified as a hyperparameter. Once we meet one of these 3 conditions, the final node on the tree branches becomes a 'leaf' which is what the decision tree will use to make its final decisions.
-# MAGIC   
-# MAGIC   In the context of classification, a decision tree will return the most probable answer on the leaf it ends up on. In our example above, if we had a decision tree that has only one split on the categorical feature at point 'a' then our branches would have the following counts:
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_3.PNG?token=ANGE54NO6NRJW6FTGUA4LD3BW62EM)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_4.PNG?token=ANGE54MLXMLJSAIHAHJLDGLBW62FS)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_5.PNG?token=ANGE54LQNXJ44OZZOVUBOADBW62G4)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_6.PNG?token=ANGE54JCG5VAJTQIMKEL4ALBW62I2)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/tds_7.PNG?token=ANGE54N3H4HQD7F54KG3HMTBW62KI)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC After running using the equations detailed above to find the weighted gini impurity at each potential split point of both the categorical and continuous variable, we can see that the optimal split point is the categorical feature, split on 'a' because it results in the lowest gini impurity of 0.199. As a result this feature and split point will be the root (the first split point) of the decision tree. This process will be repeated at each node until 1) there is a pure split, 2) we reach a maximum depth specified as a hyperparameter, or 3) we do not meet a minimum information gain threshold specified as a hyperparameter. Once we meet one of these 3 conditions, the final node on the tree branches becomes a 'leaf' which is what the decision tree will use to make its final decisions [17].
+# MAGIC 
+# MAGIC In the context of classification, a decision tree will return the most probable answer on the leaf it ends up on. In our example above, if we had a decision tree that has only one split on the categorical feature at point 'a' then our branches would have the following counts:
+# MAGIC 
 # MAGIC   
 # MAGIC   Leaf 1  
 # MAGIC   class 0 count: 3  
@@ -3333,6 +3376,22 @@ for i in list(toy_df.means[:-1]):
 # MAGIC   
 # MAGIC   
 # MAGIC   If we are on leaf 1 of this tree, we will predict class 1 because it has a probability of \\(\frac{4}{5} = .80\\) vs the probability of class 0 of \\(\frac{1}{5} = .20\\)  
+# MAGIC   
+# MAGIC   
+# MAGIC ### Gradient Boosted Trees
+# MAGIC 
+# MAGIC Gradient boosted trees (GBTs) build on the concept of decision trees with two additional concepts, an ensemble model, and a loss function.  
+# MAGIC 
+# MAGIC A gradient boosted tree algorithm is composed of lots of very simple decision trees. Each tree however, is very shallow, often only having a single split. These individual trees are 'weak learners' which on their own do not generate strong predictions, but when put together in an ensemble, can perform very well [8].  
+# MAGIC 
+# MAGIC The method of putting these trees together is done by measuring the loss function after each weak learner has been fit. The loss function will determine how well the current GBT is performing. In our case we use log loss for our loss function.
+# MAGIC log loss equation [6]:
+# MAGIC 
+# MAGIC \\(Log\ Loss_i = -((Label_i \bullet ln(p_i)) + (1 - Label_i)\bullet ln(1-p_i)) \\)
+# MAGIC 
+# MAGIC After the loss is measured, the derivative is taken to find the gradient of the loss function. This gradient is then used to determine which weak learner to add next such that it moves in the direction that minimizes the loss function. This procedure results in each subsequent weak learner compensating for the shortcomings of the GBT, allowing the tree to attain a high degree of performance as a result of the ensemble [8].
+# MAGIC   
+# MAGIC Each subsequent weak learner decision tree is added to the GBT, until a threshold is met. This threshold is user defined and can be the number of trees, or if the loss function starts to stagnate or increase. We use the minimum information gain, and max depth parameters to regularize the model to avoid overfitting [8].
 
 # COMMAND ----------
 
@@ -3486,7 +3545,19 @@ test_predictions.write.mode('overwrite').parquet(f"{blob_url}/test_predictions")
 # MAGIC %md
 # MAGIC 
 # MAGIC # Conclusions 
-# MAGIC Report results and learnings for both the ML as well as the scalability.
+# MAGIC 
+# MAGIC 
+# MAGIC The final model was a Gradient Boosted Tree with the following parameters: {Minimum Information Gain = 0.0; Maximum Depth = 4}. The model had an F-beta of 0.60 on the 2019 test data, with a training runtime of 3059.3 seconds (51 minutes), which included a random parameter search across 3 values for the optimal configuration of the two parameters listed above. This allowed us to more efficiently search the entire potential parameter space than a manual or exhaustive grid-search [14].  
+# MAGIC 
+# MAGIC The model demonstrates a lack of overfitting (low variance, high bias) given our test performance was higher than training. This was an intentional goal in our process, which we achieved through:  
+# MAGIC 
+# MAGIC * Dimensionality reduction (reducing our potential feature space)
+# MAGIC * Resampling for unbalanced classes in training (reducing our “model” bias but decreasing sample variance by preventing over-indexing on majority class examples)
+# MAGIC * 10-fold cross-validation strategy which decreased sensitivity to sampling (decreased variance). 
+# MAGIC 
+# MAGIC The model also demonstrates that we achieved our other goal of minimizing false-positives, as our false-positive rate is only 16%, compared to a 23% false negative rate. We also effectively met our business case for our passengers. Assuming $47 per hour of passenger time, and each false negative prediction of flight delay represents 1 hour of lost time, our model would result in 1,079,314 false negatives while a model that predicts no-delay every time (or the absence of any model), would result in 2,383,447 false negatives. This represents a time savings of 1,304,133 passenger hours, or an equivalent $61,294,251 USD.  
+# MAGIC 
+# MAGIC Other learnings and potential directions for future iterations focus largely around scalability. An interesting learning was the susceptibility of our model runtimes (and thus model selection) to regional Cloud demand. During our final training and test run, Cloud resources were hard-capped due to an increased max node capacity for all users in our region. In the absence of cloud resource elasticity, our training was largely being conducted on 2 Virtual Machines (versus the 6 we were planning for). This diminished runtime also washed out efficiency differences between models that we observed under an ideal cluster configuration with 6 workers. Random Forest and Decision Tree took approximately the same amount of time as GBT under the constrained run, when an ideal resource allocation resulted in a 6x runtime advantage to these other models. In light of this, a promising future direction of research is to incorporate the same experimental set-up we used for statistical performance across models (i.e. F-beta scores) with runtime complexity. There is a high likelihood that any one runtime observation of a model is due to chance, and so a sampling method should be implemented to establish a confidence interval in runtime performance differences across models (and time of day or compute demand). 
 
 # COMMAND ----------
 
@@ -3560,8 +3631,88 @@ print(f'Total Notebook Elapsed Runtime: {total_notebook_elapsed_time}')
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Application of Course Concepts
-# MAGIC Pick 3-5 key course concepts and discuss how your work on this assignment illustrates an understanding of these concepts.
+# MAGIC 
+# MAGIC 
+# MAGIC #### Scalability / Time complexity / I/O vs Memory
+# MAGIC 
+# MAGIC Scalability was a top priority in the development of our algorithm(s) and workflow. We adopted a framework to test for “seamless scalability” via the linear scaling of our algorithms [2] with the number of data elements (rows * features) or model elements (cross-validator models * paramGrid size) in order to constrain our experimental framework for model selection to an optimal set-up for our cluster configuration (6 workers * 4 cores). Results are appended under “Define Experimental Framework Constraints...” section. The primary lever we utilized to adjust the observed scalability, was the CrossValidator parameter ‘parallelism’ [18]. We determined that a parallelism setting of 35, with a paramGrid total size of 4 (2 parameters * 2 parameter values), over four 10-fold cross-validation models trained on the same 20% sample of the full training data, yielded the best compromise between statistical power (to yield valid conclusions regarding the true population means of F-beta performance) and computational runtime. This allowed us to do a wider search over potential models & hyperparam combinations, while yielding F-beta results that gave high enough statistical confidence that the model we selected as best model, was a valid result that would hold on the full dataset.
+# MAGIC 
+# MAGIC 
+# MAGIC In the results (under “Define Experimental Framework Constraints...” section), one can observe that data scales approximately linearly (indicating our cluster and infrastructure is scaling “out” as expected). You can also see that the parallelism setting of 35 yielded the best runtime performance on our cluster config, indicating the right balance between data partitioning and shuffling over our cluster, while maximizing the CPU capacity of each worker. In other words, we appropriately scaled “out” over our cluster. The alternative is scaling “up” by overloading a single machine’s resources. A higher parallelism setting (than 35) leads to increasing runtimes, indicating we are creating too much shuffling and communication (i.e. synchronization) costs across our cluster [1]. Communication costs over the network tend to be the most expensive operation in a Map-Reduce framework, so balancing this parameter is a delicate art. By using clusters of cheap commodity computers, Hadoop MapReduce and other parallel frameworks, are able to scale "out" not "up" by leveraging the faster times of memory (RAM) and running all operations locally (using data locality as a core tenant to improve performance) across many machines.
+# MAGIC 
+# MAGIC 
+# MAGIC #### Data Partitioning & PySpark Windows
+# MAGIC 
+# MAGIC As we learned in class, Data Partitioning provides the ability to segment data based on key and perform distributed operations on each partition in parallel. PySpark provides internal machinery for performing this same operation in an intuitive fashion in the form of PySpark Windows [13]. A PySpark Window provides the developer the ability to reason about the partition key as a group-by function and then provides additional constructs for sorting and operating on the group of records as a whole or even on a record-by-record basis by using the `lag` and `lead` functions to grab single records behind or ahead of a predicate [13].
+# MAGIC 
+# MAGIC 
+# MAGIC 
+# MAGIC #### Bias Variance Trade-off:
+# MAGIC 
+# MAGIC To find a balance between bias and variance we used a couple techniques in our modeling design. One technique that we used was cross validation, this enables us to gain a performance metric that is less sensitive to the specific folds of the data. We used 10 fold cross validation to generate an average f-beta score across each fold of validation data. Additionally, we used regularization parameters in our models and searched through different levels of these parameters via a grid search. The regularization helps prevent overfitting, which would lead to high variance but low bias. To ensure bias also remains low, we used several models, some of which have a high modeling capacity, such as random forest and gradient boosted trees. These models have a high capacity to model complex decision boundaries and therefore generate a low bias. The challenge here is to maintain a balance between low bias and low variance. The best performance was found by using a model with high modeling capacity, and regularization in the form of limiting the maximum tree depth and minimum information gain. 
+# MAGIC 
+# MAGIC 
+# MAGIC #### Model complexity via runtime:
+# MAGIC 
+# MAGIC To assess the tradeoff of complexity vs runtime we created a function that compares the performance across different models. We used runtime and F-beta to select the most performant and accurate model. 
+# MAGIC 
+# MAGIC We used both single decision trees as well as ensemble methods in our modeling experiments. The tradeoff between these models is that while a single decision tree is more performant at scale, ensemble methods tend to generate better accuracy. This tradeoff is compared in our experimental framework such that a more complex model is only selected if the performance is statistically significantly better than the next best model.
+# MAGIC 
+# MAGIC Our experimental framework enables us to search across multiple parameters for each model type, and automatically select a model with the best performance. We only select a better performing model in the case that the f-beta score shows a higher value with statistical significance. Once the best model is selected in the initial param search, a deeper search is conducted on the selected model. This technique was selected due to the infeasibility of running an exhaustive search over each model type. This initial shallow search, followed by a deeper search enables us to select a model that shows a better tendency to fit on our data then fine tune only that model for optimal performance.
+# MAGIC 
+# MAGIC 
+# MAGIC #### Algorithm Assumptions:
+# MAGIC 
+# MAGIC Our task of binary classification narrows the scope of potential models. Our initial set of models included logistic regression, and tree models. These models are readily available in the spark ecosystem and can be applied to the task of binary classification. To reduce the scale of our grid search, we reviewed the underlying assumptions for each model to ensure we picked a smaller subset of models that would be appropriate for our task. We eliminated logistic regression initially due to its tendency to perform on linearly separable data [5]. We determined this was not a good fit by projecting our data down to 2 dimensions using PCA and plotting each class. We found the data to be highly non-linearly separable and thus chose to use tree models instead. 
+# MAGIC 
+# MAGIC Tree based models are capable of modeling highly complex decision boundaries, but are prone to overfitting. This is particularly the case when using ensembles like random forests and gradient boosted trees [8]. To balance the capability of these models and their tendency to overfit, we used strong regularization techniques. The primary regularization parameters we used were limiting the maximum tree depth and the minimum information gain. Limiting the depth of a tree forces a tree to limit the number of branches before a pure separation is attained. This helps the model to generalize by limiting the degree to which the model can fit on noise within the data. Additionally, minimum information gain ensures a tree based model will only generate a decision split if it provides a threshold level of informative value, which also enables a model to better generalize [17]. These parameters were tuned via a grid search, as it is difficult to know beforehand which parameter levels will be well suited for the task.
 
 # COMMAND ----------
 
-
+# MAGIC %md
+# MAGIC 
+# MAGIC # References
+# MAGIC 
+# MAGIC [1] (PDF) reducing data shuffling and improving map reduce ... researchgate.net. (n.d.). Retrieved December 6, 2021, from https://www.researchgate.net/publication/338040188_REDUCING_DATA_SHUFFLING_AND_IMPROVING_MAP_REDUCE_PERFORMANCE_USING_ENHANCED_DATA_LOCALITY.  
+# MAGIC 
+# MAGIC [2] Al-Said Ahmad, A., & Andras, P. (2019, July 23). Scalability analysis comparisons of cloud-based software services. Journal of Cloud Computing. Retrieved December 6, 2021, from https://journalofcloudcomputing.springeropen.com/articles/10.1186/s13677-019-0134-y.  
+# MAGIC 
+# MAGIC [3] Brownlee, J. (2020, January 14). A gentle introduction to the fbeta-measure for machine learning. Machine Learning Mastery. Retrieved December 6, 2021, from https://machinelearningmastery.com/fbeta-measure-for-machine-learning/.  
+# MAGIC 
+# MAGIC [4] Carvalho, L., Sternberg, A., Maia Gonçalves, L., Beatriz Cruz, A., Soares, J. A., Brandão, D., Carvalho, D., & Ogasawara, E. (2020). On the relevance of data science for Flight Delay Research: A systematic review. Transport Reviews, 41(4), 499–528. https://doi.org/10.1080/01441647.2020.1861123  
+# MAGIC 
+# MAGIC [5] Chavan, A. (2018, September 25). Logistic regression. Medium. Retrieved December 6, 2021, from https://medium.com/@akshayc123/logistic-regression-87f7fbb4aaf6#:~:text=Logistic%20Regression%20(LR)%20is%20a,well%20on%20linearly%20separable%20classes.  
+# MAGIC 
+# MAGIC [6] Dembla, G. (2021, December 3). Intuition behind log-loss score. Medium. Retrieved December 6, 2021, from https://towardsdatascience.com/intuition-behind-log-loss-score-4e0c9979680a.  
+# MAGIC 
+# MAGIC [7] Dhebar, Y., Gupta, S., & Deb, K. (2020). Evaluating nonlinear decision trees for binary classification tasks with other existing methods. 2020 IEEE Symposium Series on Computational Intelligence (SSCI). https://doi.org/10.1109/ssci47803.2020.9308505  
+# MAGIC 
+# MAGIC [8] Dhingra, C. (2020, December 28). A visual guide to gradient boosted trees. Medium. Retrieved December 6, 2021, from https://towardsdatascience.com/a-visual-guide-to-gradient-boosted-trees-8d9ed578b33.  
+# MAGIC 
+# MAGIC [9] G, E. (n.d.). U.S. passenger carrier delay costs. Airlines For America. Retrieved December 6, 2021, from https://www.airlines.org/dataset/u-s-passenger-carrier-delay-costs/.  
+# MAGIC 
+# MAGIC [10] General. BTS. (n.d.). Retrieved December 6, 2021, from https://www.transtats.bts.gov/Glossary.asp?index=C.  
+# MAGIC 
+# MAGIC [11] General. BTS. (n.d.). Retrieved December 6, 2021, from https://www.transtats.bts.gov/OT_Delay/OT_DelayCause1.asp.  
+# MAGIC 
+# MAGIC [12] Gopalakrishnan, K., & Balakrishnan, H. (2017). A Comparative Analysis of Models for Predicting Delays in Air Traffic Networks. USA/Europe Air Traffic Management Research and Development Seminar, 12.  
+# MAGIC 
+# MAGIC [13] KnockData. (2019, March 21). Spark window function - pyspark. Everything About Data. Retrieved December 6, 2021, from https://knockdata.github.io/spark-window-function/.  
+# MAGIC 
+# MAGIC [14] Li, L. (2019, December 19). Massively parallel hyperparameter optimization. Machine Learning Blog | ML@CMU | Carnegie Mellon University. Retrieved December 6, 2021, from https://blog.ml.cmu.edu/2018/12/12/massively-parallel-hyperparameter-optimization/.  
+# MAGIC 
+# MAGIC [15] ML tuning: Model selection and hyperparameter tuning. ML Tuning - Spark 3.2.0 Documentation. (n.d.). Retrieved December 6, 2021, from https://spark.apache.org/docs/latest/ml-tuning.html.  
+# MAGIC 
+# MAGIC [16] Rebollo, J. J., & Balakrishnan, H. (2014). Characterization and prediction of air traffic delays. Transportation Research Part C: Emerging Technologies, 44, 231–241. https://doi.org/10.1016/j.trc.2014.04.007  
+# MAGIC 
+# MAGIC [17] Roy, A. (2020, November 6). A dive into decision trees. Medium. Retrieved December 6, 2021, from https://towardsdatascience.com/a-dive-into-decision-trees-a128923c9298.  
+# MAGIC 
+# MAGIC [18] Spark configuration. Configuration - Spark 3.2.0 Documentation. (n.d.). Retrieved December 6, 2021, from https://spark.apache.org/docs/latest/configuration.html.  
+# MAGIC 
+# MAGIC [19] Two independent samples unequal variance (Welch's test). ENV710 Statistics Review Website. (2018, August 25). Retrieved December 6, 2021, from https://sites.nicholas.duke.edu/statsreview/means/welch/.  
+# MAGIC 
+# MAGIC [20] Two-sample T-test design. Design 2-Sample T Test. (n.d.). Retrieved December 6, 2021, from https://vsp.pnnl.gov/help/Vsample/Design_2_Sample_T_Test.htm.  
+# MAGIC 
+# MAGIC [21] Weather Research and Forecasting Innovation Act (. Welcome to the NOAA Institutional Repository. (n.d.). Retrieved December 6, 2021, from https://repository.library.noaa.gov/.  
+# MAGIC 
+# MAGIC [22] Weir, M. (2019, November 4). How much airfare in the US costs today compared to 10 years ago. Business Insider. Retrieved December 6, 2021, from https://www.businessinsider.com/fight-prices-airfare-average-cost-usa-2019-11.   
