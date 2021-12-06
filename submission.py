@@ -237,9 +237,7 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC 
-# MAGIC ![Airport EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_airports.png?token=AOG7ANWUYF467YGCREW6YWLBW2D42)
+
 
 # COMMAND ----------
 
@@ -259,9 +257,7 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC 
-# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_stations.png?token=AOG7ANVSO2VV2R2ZMFXBUL3BW2D56)
+
 
 # COMMAND ----------
 
