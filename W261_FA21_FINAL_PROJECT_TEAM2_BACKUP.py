@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import time
 
 from math import radians, cos, sin, asin, sqrt
 from pyspark.sql import functions as sf
@@ -38,6 +39,8 @@ from datetime import datetime, timedelta
 from pyspark.ml.feature import OneHotEncoder
 from pyspark.ml.feature import StringIndexer
 from pyspark.ml import Pipeline
+
+from pyspark.ml.feature import PCA
 
 pp = pprint.PrettyPrinter(indent=2)
 root_data_path = '/mnt/mids-w261/datasets_final_project'
@@ -54,7 +57,7 @@ spark.conf.set(
 )
 
 INITIALIZE_DATASETS = False
-RENDER_EDA_TABLES = True
+RENDER_EDA_TABLES = False
 WEATHER_AGGREGATE_WINDOW_SECONDS = 60 * 30 # 30 minutes
 
 
@@ -83,7 +86,7 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
       info = fields.get(column_name, {})
       column_desc = info.get('description', None) or ''
       column_type = str(df_spark.schema[column_name].dataType)
-      is_numeric = column_type == 'DoubleType' or column_type == 'IntegerType'
+      is_numeric = column_type == 'DoubleType'
       
       mean_val = round(means[column_name], 2) if is_numeric else 0
       min_val = round(mins[column_name], 2) if is_numeric else 0
@@ -99,6 +102,11 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
     column_table.append(f'</tbody></table>')
     
     return ''.join(column_table), df_pandas
+
+# COMMAND ----------
+
+#Start timer to record end-to-end notebook runtime. 
+notebook_start = time.time()
 
 # COMMAND ----------
 
@@ -207,14 +215,14 @@ def f_beta(prediction_df, beta = 0.5):
 # MAGIC %md
 # MAGIC 
 # MAGIC # EDA & Discussion of Challenges
+# MAGIC 
+# MAGIC Determine a handful of relevant EDA tasks that will help you make decisions about how you implement the algorithm to be scalable. Discuss any challenges that you anticipate based on the EDA you perform.
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Airport Data
-# MAGIC 
-# MAGIC The lat/lon locations and timezone offsets for airports is downloaded from OpenFlights.org, the entire dataset is 7,697 rows. The historical flight data only contains domestic flights so we only keep airports that are in the US and that have a UTC offset, this reduces the dataset down to 1,512 rows.
 
 # COMMAND ----------
 
@@ -237,17 +245,9 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC 
-# MAGIC ![Airport EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_airports.png?token=AOG7ANWUYF467YGCREW6YWLBW2D42)
-
-# COMMAND ----------
-
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Weather Station Data
-# MAGIC 
-# MAGIC The Weather Station dataset contains data about 5,004,169 NOAA weather stations.
 
 # COMMAND ----------
 
@@ -261,15 +261,8 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_stations.png?token=AOG7ANVSO2VV2R2ZMFXBUL3BW2D56)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC 
 # MAGIC ## Joining Airports to Weather Stations
-# MAGIC 
-# MAGIC We are only interested in the weather stations closest to the airports, so we are able to eliminate 99.9742% of the weather stations by joining it to the Airport dataset, so there's only 1,291 rows. The join is more complex than a simple key-based join, we use the distance of the weather station from the airport as the predicate for selecting which weather station is the closest. If an airport does not have a weather station within 5 kilometers then the airport is eliminated from the list of candidate airports because weather is hyperlocal and anything more than 5 kilometers aways will have a minimal effect on the airport's departure. 
+# MAGIC There's a lot of weather stations and a ton of unnecessary data in the weather dataset.
 
 # COMMAND ----------
 
@@ -298,7 +291,7 @@ if INITIALIZE_DATASETS:
   df_airport_station_distances = df_airport_station_distances.select('*', udf_get_distance(df_airport_station_distances.station_lat, 
                                                                                            df_airport_station_distances.station_lon,
                                                                                            df_airport_station_distances.airport_lat, 
-                                                                                           df_airport_station_distances.airport_lon).alias('distance').cast(DoubleType()))
+                                                                                      df_airport_station_distances.airport_lon).alias('distance').cast(DoubleType()))
   
   df_airport_station_shortest_distance = df_airport_station_distances.groupBy('icao').agg(sf.min(sf.col('distance')).alias('distance'))
   
@@ -306,29 +299,18 @@ if INITIALIZE_DATASETS:
   df_closest_airport_station = df_closest_airport_station.where('distance <= 5')
   df_closest_airport_station = df_closest_airport_station.drop('airport_lat', 'airport_lon', 'station_lat', 'station_lon', 'count', 'distance')
   
-  dbutils.fs.rm(f"{blob_url}/df_closest_airport_station", True)
   df_closest_airport_station.write.mode('overwrite').parquet(f"{blob_url}/df_closest_airport_station")
   
 else:
   df_closest_airport_station = spark.read.parquet(f'{blob_url}/df_closest_airport_station/')
   
-if RENDER_EDA_TABLES:
-  html, _ = generate_eda_table(df_closest_airport_station, sample_fraction=1.0)
-  displayHTML(html)
+df_closest_airport_station.count()
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC 
-# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_station_airport.png?token=AOG7ANXPAEWB4VKIELP2OJDBW2D6Y)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC 
-# MAGIC ## Historical Flights Dataset
-# MAGIC 
-# MAGIC The Historical Flight dataset contains 63,493,682 commerical domestic flights from years 2015 to 2019.
+# MAGIC ## Historical Flight Data
 
 # COMMAND ----------
 
@@ -400,8 +382,6 @@ df_flights_fields = {
 }
 
 df_flights = spark.read.parquet(f'{root_data_path}/parquet_airlines_data/*')
-
-# Convert all features to lowercase names to reduce confusion
 df_flights = df_flights.toDF(*[c.lower() for c in df_flights.columns])
 
 if RENDER_EDA_TABLES:
@@ -410,19 +390,9 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC 
-# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_flight_1.png?token=AOG7ANSGRYCWHLR7HZRJ2TDBW2EKK)
-# MAGIC 
-# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_flight_2.png?token=AOG7ANTIGOTBV7VJNDPHVM3BW2EKU)
-
-# COMMAND ----------
-
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Remove Invalid & Duplicate Flights
-# MAGIC 
-# MAGIC Flights that have been cancelled, diverted, lack an arrival time, lack a tail number, have a flight time less than 30 minutes, lack a depature time, or lack an arrival delay are considered invalid. Additionally, flights that have the plane visit the same airport more than once in the same day should be considered duplicates. This reduces this dataset from 63,493,682 down to 48,844,778.
 
 # COMMAND ----------
 
@@ -436,7 +406,6 @@ df_valid_flights = df_flights.where((df_flights.cancelled == 0) & # flight hasn'
                                     (df_flights.arr_delay.isNotNull()) # arrival delay was indicated
                                    )
 
-# Find all duplicate flights by windowing by tail number, flight date, and origin. Sort by the scheduled departure time and only use the latest one
 window = Window.partitionBy('tail_num', 'fl_date', 'origin_airport_id').orderBy(sf.col('crs_dep_time').desc())
 df_valid_flights = df_valid_flights.withColumn('rank', sf.rank().over(window).cast(IntegerType())).filter(sf.col('rank') == 1).drop('rank')
 
@@ -449,8 +418,6 @@ print(f'The original dataset had {pre_filtered_count:,} records, {filtered_count
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Join Flight Data to Weather Station Data
-# MAGIC 
-# MAGIC We join the airport information containing the closest weather station identifier to the historical flight data, this gets us the nearest weather station and UTC offsets for the origin and destination of each historical flight.
 
 # COMMAND ----------
 
@@ -499,8 +466,6 @@ df_valid_flights = df_valid_flights.withColumn('rank', sf.percent_rank().over(Wi
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Previous Flight Data
-# MAGIC 
-# MAGIC We believe that certain pieces of previous flight information for a tail number in the same day, in other words, the previous leg of a multi-leg flight, contains valuable information for predicting late departures. 
 
 # COMMAND ----------
 
@@ -515,10 +480,6 @@ for previous_flight_feature in previous_flight_features:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Weather Data
-# MAGIC 
-# MAGIC The original weather dataset contains 630,904,436 rows. The fields WND, CIG, VIS, TMP, DEW, and SLP contain comma-delimited information regarding the raw values, qauality of the reading, additional coded values, and "magic" values mean NULL.
-# MAGIC 
-# MAGIC We join the weather data to the just the weather stations that are closest to the airports and we end up with 93,145,915 rows of weather data.
 
 # COMMAND ----------
 
@@ -536,6 +497,10 @@ def udf_get_value(null_value):
 if INITIALIZE_DATASETS:
     
   df_weather = spark.read.parquet(f"{root_data_path}/weather_data/*")
+  
+#   df_weather = df_weather.withColumn('id', sf.concat_ws('-', 'station_id', 'read_date'))
+#   df_weather = df_weather.groupby('id').count()
+#   df_weather = df_weather.filter('count > 1')  
   
   df_weather = df_weather.withColumn("station_id", sf.col("STATION")).join(df_closest_airport_station, on='station_id').select(
     'STATION', # 0
@@ -611,8 +576,6 @@ if RENDER_EDA_TABLES:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Weather Data Aggregation
-# MAGIC 
-# MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. The aggregation of the weather data allows us to match this bucketed timeframe to bucketed timeframes for the fights, it takes the dataset from 93,145,915 rows to 70,539,940. 
 
 # COMMAND ----------
 
@@ -630,11 +593,12 @@ for numeric_weather_feature in numeric_weather_features:
                                sf.min(numeric_weather_feature).alias(f'{numeric_weather_feature}_min'), 
                                sf.max(numeric_weather_feature).alias(f'{numeric_weather_feature}_max')]
 
-# We bucket the read_date of the into 30 minute buckets
 seconds_window = sf.from_unixtime(sf.unix_timestamp('read_date') - sf.unix_timestamp('read_date') % WEATHER_AGGREGATE_WINDOW_SECONDS)
 df_weather_summary = df_weather.withColumn('aggregated_datetime', 
                                            seconds_window.cast(TimestampType())).groupBy('station_id', 
                                                                                          'aggregated_datetime').agg(*expressions)
+
+df_weather_summary = df_weather_summary.cache()
 
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_weather_summary, 0.002, df_weather_fields)
@@ -645,23 +609,17 @@ if RENDER_EDA_TABLES:
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Join Flight Data to Weather Data
-# MAGIC 
-# MAGIC We join the flight dataset with the weather dataset by bucketing the `crs_dep_datetime_utc` of the flight dataset into 30 minute buckets just like we did for the weather data and then perform a left join on the bucketed timestamps. We perform a left-join to keep flights that do not have any weather data associated.
 
 # COMMAND ----------
 
-# Window the data by the scheduled departure date into 30-minute buckets. 
 seconds_window = sf.from_unixtime(sf.unix_timestamp('crs_dep_datetime_utc') - sf.unix_timestamp('crs_dep_datetime_utc') % WEATHER_AGGREGATE_WINDOW_SECONDS)
 
-# Match the bucketed weather datetime with the bucketed scheduled departure date subtracted by two hours. We perform a left-join, rather than inner, so as to keep flights that don't have corresponding weather data. 
 df_joined = df_valid_flights.withColumn('aggregated_datetime', seconds_window.cast(TimestampType()) - sf.expr("INTERVAL 2 HOURS")).join(
   df_weather_summary.withColumn('origin_station_id', sf.col('station_id')),
   on=['origin_station_id', 'aggregated_datetime'], how='left'
 )
 
 # COMMAND ----------
-
-# There are several features that are 100% NULL or would not be known two hours before a departure, we eliminate those features to reduce complexity.
 
 junk_features = {
     'cancellation_code',
@@ -726,33 +684,9 @@ df_joined = df_joined.drop(*junk_features)
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC 
-# MAGIC ## Balance the Dataset
-# MAGIC 
-# MAGIC The dataset contains MANY more flights that are not delayed by 15 minutes or more than flights that are, so for the training set we balance the examples for both so the model does not become overfit.
-
-# COMMAND ----------
-
-ALPHA = 0.9
-
-positive_sample_count = df_joined.filter('dep_del15 == 1').count()
-negative_sample_count = df_joined.filter('dep_del15 == 0').count()
-
-df_positive_sample = df_joined.filter('dep_del15 == 1')
-df_negative_sample = df_joined.filter('dep_del15 == 0').sample(False, positive_sample_count / (negative_sample_count * ALPHA))
-
-df_joined = df_negative_sample.union(df_positive_sample)
-
-# COMMAND ----------
-
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Impute missing weather features
-# MAGIC 
-# MAGIC There are XXXXX flights that do not contain weather information, however, we do not wish to exclude these from training. We impute 
-# MAGIC 
-# MAGIC Rather than setting the NULLs to zero, which for some features be an extreme value, we set the NULLs to the mean.
 
 # COMMAND ----------
 
@@ -770,7 +704,6 @@ df_joined = imputer.fit(df_joined).transform(df_joined)
 # COMMAND ----------
 
 if INITIALIZE_DATASETS:
-  dbutils.fs.rm(f"{blob_url}/df_joined", True)
   df_joined.write.mode('overwrite').parquet(f"{blob_url}/df_joined")
 
 df_joined = spark.read.parquet(f'{blob_url}/df_joined/*')
@@ -791,8 +724,6 @@ if RENDER_EDA_TABLES:
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Day of Year
-# MAGIC 
-# MAGIC There are certain times of the year where people travel more than others; summer break, Thanksgiving, July 4th, etc. Depending on the days of the week and school schedules, these popular travel days can vary year-to-year but generally fall into the same 10-day range year-after-year. We have added the `day of year` feature to capture these busy travel days and the potential congestion they cause.  
 
 # COMMAND ----------
 
@@ -803,8 +734,6 @@ df_joined = df_joined.withColumn('dep_day_of_year', sf.dayofyear('dep_datetime_l
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Minute of Day
-# MAGIC 
-# MAGIC Much like the `day of year`, `minute of day` is designed to capture the approximate time of day that people generally prefer to travel with more granularity than simply the hour.  
 
 # COMMAND ----------
 
@@ -815,8 +744,6 @@ df_joined = df_joined.withColumn("dep_minute_of_day", (sf.hour('dep_datetime_loc
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Previous Flight Delayed
-# MAGIC 
-# MAGIC Domestic flights typically have multiple legs throughout the day, meaning they drop passengers off at different stops. Airlines build buffer into the flight schedule to accomodate delays, however, that buffer is very limited. If the previous flight is delayed by more than the buffer then the next flight is going to be delayed. However, because we are predicting flight delays by two-hours ahead of time, only if the previous flight is longer than two hours will we know if it was delayed.
 
 # COMMAND ----------
 
@@ -830,15 +757,12 @@ def udf_calculate_previous_flight_delay(previous_scheduled_elapsed_time, previou
 
 df_joined = df_joined.withColumn('previous_flight_dep_delay_new_2', 
                                   udf_calculate_previous_flight_delay('previous_flight_crs_elapsed_time', 'previous_flight_dep_delay_new').cast(DoubleType()))
-#TODO: Add back previous_flight_crs_elapsed_time
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Handle NULL values
-# MAGIC 
-# MAGIC Flights that did not have a previous leg will, by defintion, will not be delayed by a previous leg, so we set the `previous_flight_crs_elapsed_time` and `previous_flight_dep_delay_new` features to zero.
 
 # COMMAND ----------
 
@@ -851,16 +775,6 @@ df_joined = df_joined.na.fill(value=0, subset=zero_fills)
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Log10 
-# MAGIC 
-# MAGIC We perform a log10 on all the continuious fields, this has the affect of sacrificing data fidelity in exchange for usually normalizing the data. 
-
-# COMMAND ----------
-
-numerical_features = [column_name for column_name, column_type in df_joined.dtypes 
-                      if str(column_type) == 'double' or str(column_type) == 'integer']
-
-for numerical_feature in numerical_features:
-  df_joined = df_joined.withColumn(f'{numerical_feature}_log', sf.log10(numerical_feature))
 
 # COMMAND ----------
 
@@ -870,8 +784,10 @@ for numerical_feature in numerical_features:
 
 # COMMAND ----------
 
+# print(df_joined.count())
+# print(df_joined.take(5))
+
 if INITIALIZE_DATASETS:
-  dbutils.fs.rm(f"{blob_url}/df_joined_final", True)
   df_joined.write.mode('overwrite').parquet(f"{blob_url}/df_joined_final")
 
 print('loading from storage...')
@@ -897,35 +813,37 @@ if RENDER_EDA_TABLES:
 
 target_feature = 'dep_del15'
 split_feature = 'crs_dep_datetime_utc'
+#Year can't be included in transformer stages later so we will pull out separately now. 
+year_feature =  'year'
 categorical_features = list({'dest',
-                             'origin',
-                             'op_unique_carrier',
-                             'year', 
-                             'month',
-                             'day_of_week',
-                             'previous_flight_origin_airport_id'})
+                        'origin',
+                        'op_unique_carrier',
+                        'month',
+                        'day_of_week',
+                        'previous_flight_origin_airport_id'})
 
 continuous_features = list({'day_of_month',
-                            'dep_minute_of_day',
-                            'dep_day_of_year_log',
-                            'taxi_out_log',
-                            'taxi_in_log',
-                            'crs_elapsed_time_log',
-                            'distance_log',
-                            'previous_flight_crs_elapsed_time_log',
-                            'wind_speed_mean_log',
-                            'wind_speed_max_log',
-                            'ceiling_height_mean_log',
-                            'visibility_distance_mean_log',
-                            'visibility_distance_max_log',
-                            'temperature_mean_log',
-                            'temperature_dewpoint_mean_log',
-                            'air_pressure_mean_log',
-                            'previous_flight_dep_delay_new_2_log'})
+                      'dep_minute_of_day',
+                      'dep_day_of_year_log',
+                      'taxi_out_log',
+                      'taxi_in_log',
+                      'crs_elapsed_time_log',
+                      'distance_log',
+                      'previous_flight_crs_elapsed_time_log',
+                      'wind_speed_mean_log',
+                      'wind_speed_max_log',
+                      'ceiling_height_mean_log',
+                      'visibility_distance_mean_log',
+                      'visibility_distance_max_log',
+                      'temperature_mean_log',
+                      'temperature_dewpoint_mean_log',
+                      'air_pressure_mean_log',
+                      'previous_flight_dep_delay_new_2_log'})
 
 all_features = categorical_features + continuous_features
 all_features.append(target_feature)
 all_features.append(split_feature)
+all_features.append(year_feature)
 
 df_raw_features = df_joined.select(*all_features)
 
@@ -935,7 +853,7 @@ df_raw_features = df_raw_features.na.fill(value=0, subset=['previous_flight_dep_
 imputer = Imputer(inputCols=continuous_features, outputCols=continuous_features).setStrategy("mean")
 df_raw_features = imputer.fit(df_raw_features).transform(df_raw_features)
 
-if RENDER_EDA_TABLES:
+if True: #RENDER_EDA_TABLES:
   
   html, df_raw_features_sample = generate_eda_table(df_raw_features, 0.001, {})
   displayHTML(html)
@@ -957,7 +875,7 @@ from pyspark.sql.functions import when
 
 # Separate our training data (pre-2019) and blind test data (2019), which we will use in final step for testing. 
 df_raw_features_train = df_raw_features.where("year < 2019").cache()
-df_raw_features_test = df_raw_features.where("year >= 2019").cache()
+df_raw_features_test = df_raw_features.where("year = 2019").cache()
 
 pipeline_steps = list()
 
@@ -981,12 +899,39 @@ assemblerInputs = [f'{feature}_oh' for feature in categorical_features] + ['scal
 assembler = VectorAssembler(inputCols=assemblerInputs, outputCol='features')
 pipeline_steps += [assembler]
 
-featureTransform = Pipeline(stages=pipeline_steps).fit(df_raw_features_train)
-
+pipeline = Pipeline(stages=pipeline_steps)
+#Fit on train_data. 
+featureTransform = pipeline.fit(df_raw_features_train)
+#Transform both train data / test data with the train data pipeline. 
 train_model = featureTransform.transform(df_raw_features_train)
 test_model = featureTransform.transform(df_raw_features_test)
 
-train_model
+#Cache models 
+train_model.cache()
+test_model.cache()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ## Balance the Training Dataset
+
+# COMMAND ----------
+
+# Define the proportion (to majority class) to resample the undersampled class. Alpha of 1.0 yields 50/50 balance. 
+ALPHA = 0.9
+
+positive_sample_count = train_model.filter('dep_del15 == 1').count()
+negative_sample_count = train_model.filter('dep_del15 == 0').count()
+
+df_positive_sample = train_model.filter('dep_del15 == 1')
+df_negative_sample = train_model.filter('dep_del15 == 0').sample(False, positive_sample_count / (negative_sample_count * ALPHA))
+
+train_model = df_negative_sample.union(df_positive_sample)
+
+# COMMAND ----------
+
+# MAGIC %md ##Add Cross-Validation Folds for Time-Series valid CV strategy. 
 
 # COMMAND ----------
 
@@ -1017,13 +962,119 @@ train_model = train_model.withColumn("foldNumber", when((train_model.rank < .07)
 
 # COMMAND ----------
 
-#Check that everything is working as intended (i.e. no data leakage, foldNumbers correctly allocated, features transformed appropriately, etc.)
-train_model.sample(fraction=0.0001).toPandas()
+#Create a validation dataframe for our majority class prediction model. This will be all rows with odd numbers in "foldNumber" column (i.e i % 2 != 0). 
+validation_data = train_model.where("foldNumber % 2 != 0")
 
 # COMMAND ----------
 
-#Create a validation dataframe for our majority class prediction model. This will be all rows with odd numbers in "foldNumber" column (i.e i % 2 != 0). 
-validation_data = train_model.where("foldNumber % 2 != 0")
+# MAGIC %md ## Add PCA Transformed Feature List
+
+# COMMAND ----------
+
+# MAGIC %md #### Determine if Logistic Regression Algorithm is valid by using PCA to test that data is linearly separable. 
+
+# COMMAND ----------
+
+# Use sklearn implementation on sample for quick implementation.  
+from sklearn.decomposition import PCA
+# take a sample
+pddf = train_model.sample(fraction=0.01).toPandas()
+
+# implement one hot encoding
+pddf.drop(['vectors', 'scaled_vectors', 'features', 'origin_oh', 'day_of_week_oh', 'dest_oh', 'crs_dep_datetime_utc', 'previous_flight_origin_airport_id_oh', 'month_oh', 'op_unique_carrier_oh'], axis=1, inplace=True)
+pddf.dest = 'dest' + pddf.dest 
+pddf.origin = 'origin' + pddf.origin
+pddf.month = 100 + pddf.month
+a = pd.get_dummies(pddf.origin, drop_first=True)
+b = pd.get_dummies(pddf.dest, drop_first=True)
+c = pd.get_dummies(pddf.op_unique_carrier, drop_first=True)
+d = pd.get_dummies(pddf.month, drop_first=True)
+e = pd.get_dummies(pddf.day_of_week, drop_first=True)
+f = pd.get_dummies(pddf.previous_flight_origin_airport_id, drop_first=True)
+pddf.drop(['origin', 'dest', 'op_unique_carrier', 'month', 'day_of_week', 'previous_flight_origin_airport_id'], axis=1, inplace=True)
+pddf = pddf.join([a,b,c,d,e,f])
+
+# implement PCA
+X = pddf.drop('dep_del15', axis=1)
+pca = PCA(n_components=2)
+pca_x = pca.fit_transform(X)
+pca_x = pd.DataFrame(pca_x)
+pca_x['dep_del15'] = pddf.dep_del15
+
+# Plot principal components 0 and 1 on axis and color code by class
+plt.scatter(pca_x[0], pca_x[1], c=pca_x['dep_del15'], alpha=0.3, cmap='bwr')
+plt.title("Non-Linearly Separable Features")
+plt.xlabel("PCA Component 1")
+plt.ylabel("PCA Component 2")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Non-Linearly Separable Features](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/1_.png?token=ASLJSW2R7MAFKKQTWHBMFF3BW2KVC)
+
+# COMMAND ----------
+
+# MAGIC %md Determine ideal number of features for PCA (k parameter) by plotting k against % of explained variance to identify "elbow-point".
+
+# COMMAND ----------
+
+pca = PCA()
+pca.fit_transform(X)
+cumulative_explained_variance = []  # holds cumulative variance values
+explained_var_list = []  # holds explained variance values
+cumulative_explained_variance = []
+total = 0  # initialize total to 0
+for i in pca.explained_variance_ratio_:  # iterate over explaiend variance ratios
+    total += i  # sum total variance 
+    cumulative_explained_variance.append(total)  # add total to list (used to plot total explained variance
+# creates first plot, a summary of individual and cumulative explained variance for each principal component
+fig, ax = plt.subplots(3,1, figsize=(15,15))
+ax[0].plot(range(len(cumulative_explained_variance)),
+       cumulative_explained_variance,
+       alpha=0.5,
+       color='red',
+       label='Total Explained Variance')
+ax[0].set_xlabel('Principal Components')
+ax[0].set_ylabel('Explained variance')
+ax[0].set_title('Line Plot of Cumulative Explained variance for all principal components')
+ax[1].plot(range(100),
+       cumulative_explained_variance[:100],
+       alpha=0.5,
+       color='red',
+       label='Total Explained Variance')
+ax[1].set_xlabel('Principal Components')
+ax[1].set_ylabel('Explained variance')
+ax[1].set_title('Zoomed in on first 100 principal components')
+ax[2].plot(range(20),
+       cumulative_explained_variance[:20],
+       alpha=0.5,
+       color='red',
+       label='Total Explained Variance')
+ax[2].set_xlabel('Principal Components')
+ax[2].set_ylabel('Explained variance')
+ax[2].set_title('Zoomed in on first 20 principal components')
+pass
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![PCA Analysis](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/2_.png?token=ASLJSW4DEXCL7TV6TM65VW3BW2KYM)
+
+# COMMAND ----------
+
+# Switch back to pyspark PCA. 
+from pyspark.ml.feature import PCA
+
+# Set k = 5, given this elbow point explains ~100% of variance. 
+pca = PCA(k = 5, inputCol="features", outputCol = "pca_features")
+
+#Fit PCA on training data, transofrm both training data and test data to prevent leakage. 
+model = pca.fit(train_model)
+
+train_model = model.transform(train_model).cache()
+test_model = model.transform(test_model).cache()
 
 # COMMAND ----------
 
@@ -1031,6 +1082,14 @@ validation_data = train_model.where("foldNumber % 2 != 0")
 # MAGIC 
 # MAGIC # Algorithm Exploration
 # MAGIC Apply 2 to 3 algorithms to the training set, and discuss expectations, trade-offs, and results. These will serve as your baselines - do not spend too much time fine tuning these. You will want to use this process to select a final algorithm which you will spend your efforts on fine tuning.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/blocked_time_series.png?token=ASLJSWZQDZ2X5XT7JQKNPADBW2NO6)
+# MAGIC 
+# MAGIC Source: https://medium.com/@soumyachess1496/cross-validation-in-time-series-566ae4981ce4
 
 # COMMAND ----------
 
@@ -1055,7 +1114,13 @@ from pyspark.ml.tuning import TrainValidationSplit, ParamGridBuilder
 
 # COMMAND ----------
 
-# MAGIC %md Define Experimental Framework Constraints, based on performance limitations observed on results here: https://docs.google.com/spreadsheets/d/1aqF0zf6Fm9QCM_mi0E-NS_F1LLFPrZAXy-ICT6-ycn4/edit?usp=sharing
+# MAGIC %md Define Experimental Framework Constraints, based on performance limitations observed on results below: 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/Scale_Full.png?token=ASLJSW2QSDE7W63JDMR6V63BW2NEQ)
 
 # COMMAND ----------
 
@@ -1063,17 +1128,20 @@ from pyspark.ml.tuning import TrainValidationSplit, ParamGridBuilder
 PARELLELISM = 35
 
 # Ideal number of PCA features observed to be 5, given just 5 features explain ~100% of variance. 
-PCA_FEATURES = 5 
+PCA_FEATURES = 5
 
 # Assuming 2 hyperparameters to search over, we limit ourselves to 2 values for each, 
 # given an optimal param search of 4, given our parallelism and config. 
 NUM_PARAM_VALUES = 2
 
-# Ideal sample size observed to be 20% for our experimentation framework, given time constraint of less than 120 minutes for model selection. 
-SAMPLE_SIZE = 0.0001
+# Ideal sample size observed to be 20% for our experimentation framework, balancing statistical power (for valid inference) and runtime. 
+SAMPLE_SIZE = 0.2
 
 # Must constrain max_tree_depth param value to 4, given linear scaling of runtime after this depth. 
 MAX_TREE_DEPTH = 4
+
+# Set alpha value for statistical significance. 
+ALPHA_SIG_VALUE = 0.05
 
 # COMMAND ----------
 
@@ -2672,16 +2740,21 @@ def compareBaselines(model = None, model_name = None, features = None, paramGrid
   '''Baseline model comparison: Similiar to the custom tuning function, this function will take a model, a feature list, training data, validation data. It will train and test the model, appending the modelName, modelObject, featuresList, precision score (i.e. the model precision score) to a list of lists to use for comparison. If model is None, predict never delayed as our 'null hypothesis' comparison.'''
   #If no model is passed, predict the majority class for our validation data (the odd numbered fold numbers in our foldCol). 
   if model is None: 
+    #Start time logging. 
+    start = time.time()
     #Append 0.0 literal to evaluation data as "prediction". 
     predictions = validation_data.withColumn('prediction_majority', f.lit(0.0))
     f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction_majority', metricName='f1', beta = 0.5, metricLabel = 1)
     f_beta_score = f_beta.evaluate(predictions)
-    #TODO: Calculate actual std. dev in fbeta across folds. 
+    #End time logging. 
+    runtime = time.time() - start
     stdDev = 0.0
     bestParams = None
     #Note we pass the paramGrid object with the baseline model so that we can easily extract the paramGrid to use for best model. 
-    return [model_name, model, features, f_beta_score, stdDev, paramGrid, bestParams]
+    return [model_name, model, features, f_beta_score, stdDev, paramGrid, bestParams, runtime]
   else:
+    #Start time logging.
+    start = time.time()
     pipeline = Pipeline(stages=[model])
     f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction', metricName='f1', beta = 0.5, metricLabel = 1)
     cv = CrossValidator(estimator=pipeline, estimatorParamMaps=paramGrid, evaluator=f_beta, numFolds = 10, parallelism=35, foldCol = 'foldNumber', collectSubModels = False)
@@ -2693,13 +2766,15 @@ def compareBaselines(model = None, model_name = None, features = None, paramGrid
     stdDev = cvModel.stdMetrics[0]
     #Get the best params
     bestParams = cvModel.getEstimatorParamMaps()[ np.argmax(cvModel.avgMetrics) ]
-    return [model_name, cvModel, features, f_beta_score, stdDev, paramGrid, bestParams]
+    #End time logging. 
+    runtime = time.time() - start
+    return [model_name, cvModel, features, f_beta_score, stdDev, paramGrid, bestParams, runtime]
 
 # COMMAND ----------
 
 def statisticalTestModels(df = None): 
   '''Takes a dateframe, sorted by increasing f_beta scores. Conducts two sample welch t-test for unequal variances
-  between two rows to determine if the f_beta score is significantly higher than previous row, or due to chance.'''
+  between two rows to determine if the mean population f_beta score is significantly higher than previous model 'population', or due to chance.'''
   prev_fbeta = None
   prev_std = None 
   p_value_to_prev = []
@@ -2726,6 +2801,100 @@ def statisticalTestModels(df = None):
 
 # COMMAND ----------
 
+def confusion_matrix(prediction_df, prediction_col, label_col):
+  """ 
+  Generates confusion matrix for a prediction dataset
+  
+  prediction_df - dataframe with predictions generated in 'prediction' and ground truth in 'dep_del15'
+  
+  cfmtrx - confusion matrix of results
+  
+  """
+
+  # True Positives:
+  tp = prediction_df.where(f'{label_col} = 1.0').where(f'{prediction_col} = 1.0').count()
+  # False Positives:
+  fp = prediction_df.where(f'{label_col} = 0.0').where(f'{prediction_col} = 1.0').count()
+  # True Negatives:
+  tn = prediction_df.where(f'{label_col} = 0.0').where(f'{prediction_col} = 0.0').count()
+  # False Negatives:
+  fn = prediction_df.where(f'{label_col} = 1.0').where(f'{prediction_col} = 0.0').count()
+  
+  data = [['Predicted Positive', tp, fp], ['Predicted Negative', fn, tn]]
+  cfmtrx = pd.DataFrame(data, columns = [0, 'Label Positive', 'Label Negative'])
+  return cfmtrx
+
+# COMMAND ----------
+
+# MAGIC %md #### Experimental set-up to test for statistically significant differences in PCA Feature performance vs. "Common-Sense" Features. 
+
+# COMMAND ----------
+
+def pcaFeatureChoice(df = None):   
+  ''' Method to run test on PCA features and normal features. Will return whichever method is preferable
+  given F-beta performance and runtime on 10-fold CV'''
+  
+  # Manually define non-random search space. This ensures data and params are controlled for in our experimental comparisons, yielding valid results. 
+  MIN_INFO_GAIN_SEARCH_LIST = [0.0, 0.2]
+  MAX_DEPTH_SEARCH_LIST = [2, 4]
+  ### 1.) Decision Tree Classifier ###
+  dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15')
+
+  # DT Param Grid
+  dt_paramGrid = ParamGridBuilder() \
+      .addGrid(dt_model.minInfoGain, MIN_INFO_GAIN_SEARCH_LIST) \
+      .addGrid(dt_model.maxDepth, MAX_DEPTH_SEARCH_LIST) \
+      .build()
+
+  ### 2.) Decision Tree Classifier with PCA ###
+  dt_model_PCA = DecisionTreeClassifier(featuresCol = 'pca_features', labelCol='dep_del15')
+
+  # DT Param Grid
+  dt_PCA_paramGrid = ParamGridBuilder() \
+      .addGrid(dt_model.minInfoGain, MIN_INFO_GAIN_SEARCH_LIST) \
+      .addGrid(dt_model.maxDepth, MAX_DEPTH_SEARCH_LIST) \
+      .build()
+
+  modelListPCA = [(dt_model, "Decision Tree", dt_paramGrid),
+               (dt_model_PCA, "PCA", dt_PCA_paramGrid)]
+
+
+  #Create an empty list of lists that we will append models & performance metrics to.
+  # Data order will be: model_name[str], model[obj], features[list], f_beta_score[float], f_beta_std_dev[float], paramGrid [obj] 
+  modelComparisonsPCA = []
+
+  #Build comparison table. 
+  for model, model_name, paramGrid in modelListPCA: 
+    modelComparisonsPCA.append(compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid, train_data = train_model_small, validation_data = validation_data))
+
+  #model_name[str], model[obj], features[list], precision[float]
+  modelComparisonsDF_PCA = pd.DataFrame(modelComparisonsPCA, columns = ['model_name', 'model_obj','feature_names','f_beta_score', 'f_beta_std_dev', 'paramGrid_obj', 'bestParams', 'runtime']).sort_values(by = 'f_beta_score').reset_index(drop=True)
+
+  modelComparisonsDF_PCA = statisticalTestModels(modelComparisonsDF_PCA)
+  
+  modelComparisonsDF_PCA
+
+  # If most performanant model is with PCA features, use PCA
+  if modelComparisonsDF_PCA['model_name'][1] == 'PCA': 
+    features = 'pca_features'
+  # If most performant model is not PCA, but DT model is not statistically different, use PCA
+  elif modelComparisonsDF_PCA['p_value_to_prev'][1] >= ALPHA_SIG_VALUE: 
+    features = 'pca_features'
+  # Otherwise use 'common-sense' features. 
+  else: 
+    features = 'features'
+
+  return features
+
+
+# COMMAND ----------
+
+# Set our training features best on statistical test result between PCA and Decision Tree. 
+model_features = pcaFeatureChoice()
+print(f'Most performant features (PCA or features): {model_features}')
+
+# COMMAND ----------
+
 # MAGIC %md 2.) Define baseline models and their hyperparam grids for non-random grid search. Consistent hyperparams across models ensures valid experimental framework. 
 
 # COMMAND ----------
@@ -2735,7 +2904,7 @@ MIN_INFO_GAIN_SEARCH_LIST = [0.0, 0.2]
 MAX_DEPTH_SEARCH_LIST = [2, 4]
 
 ### 1.) Decision Tree Classifier ###
-dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15')
+dt_model = DecisionTreeClassifier(featuresCol = model_features, labelCol='dep_del15')
 
 # DT Param Grid
 dt_paramGrid = ParamGridBuilder() \
@@ -2745,13 +2914,9 @@ dt_paramGrid = ParamGridBuilder() \
 
 
 ### 2.) Gradient Boosted Tree Classifier ###
-gbt_model = GBTClassifier(featuresCol = 'features', labelCol='dep_del15', maxIter = 20)
+gbt_model = GBTClassifier(featuresCol = model_features, labelCol='dep_del15')
 
 # GBT Param Grid
-# gbt_paramGrid = ParamGridBuilder() \
-#     .addGrid(gbt_model.stepSize, random.sample(list(np.linspace(0.1,1,11)), NUM_PARAM_VALUES)) \
-#     .build()
-
 gbt_paramGrid = ParamGridBuilder() \
     .addGrid(gbt_model.minInfoGain, MIN_INFO_GAIN_SEARCH_LIST) \
     .addGrid(gbt_model.maxDepth, MAX_DEPTH_SEARCH_LIST) \
@@ -2759,7 +2924,7 @@ gbt_paramGrid = ParamGridBuilder() \
 
 
 ### 3.) Random Forest Classifier ###
-rf_model = RandomForestClassifier(featuresCol = 'features', labelCol='dep_del15')
+rf_model = RandomForestClassifier(featuresCol = model_features, labelCol='dep_del15')
 
 # RF Param Grid
 rf_paramGrid = ParamGridBuilder() \
@@ -2785,13 +2950,19 @@ modelComparisons = []
 
 #Build comparison table. 
 for model, model_name, paramGrid in modelList: 
-  modelComparisons.append(compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid))
+  modelComparisons.append(compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid, train_data = train_model_small))
 
 #model_name[str], model[obj], features[list], precision[float]
-modelComparisonsDF = pd.DataFrame(modelComparisons, columns = ['model_name', 'model_obj','feature_names','f_beta_score', 'f_beta_std_dev', 'paramGrid_obj', 'bestParams']).sort_values(by = 'f_beta_score').reset_index(drop=True)
+modelComparisonsDF = pd.DataFrame(modelComparisons, columns = ['model_name', 'model_obj','feature_names','f_beta_score', 'f_beta_std_dev', 'paramGrid_obj', 'bestParams', 'runtime']).sort_values(by = 'f_beta_score').reset_index(drop=True)
 
 # Show results
-modelComparisonsDF['bestParams']
+modelComparisonsDF
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Model Comparisons 1](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/3_.png?token=ASLJSW5IXDQGIQHJQVQFC5DBW2K2C)
 
 # COMMAND ----------
 
@@ -2804,24 +2975,60 @@ modelComparisonsDF
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/4_.png?token=ASLJSW55Q36455Z26FBGDFDBW2LAA)
+
+# COMMAND ----------
+
 # MAGIC %md 5.) Plot the F-beta score of each of our models / model-runs in both a Dataframe and a visual to use in our presentation. Use this step to confirm everything in train/val is working as intended and we are comfortable with our final model and hyperparams. Look for signs of overfitting, etc. 
 
 # COMMAND ----------
 
-#plotCols = modelComparisonsDF[['model_name','precision_score']]
-x = modelComparisonsDF['model_name']
-y = modelComparisonsDF['f_beta_score']
+def plotPerformance(df = modelComparisonsDF, col = 'f_beta_score', title = None): 
+  '''Given Dataframe of model performance, 
+  display formatted bar chart comparison of
+  model performance.'''
+  
+  x = df['model_name']
+  y = df[col]
 
-plt.bar(x, y)
-for x,y in zip(x,y): 
-  label = "{:.3f}".format(y)
-  plt.annotate(label, # this is the text
-                 (x,y), # these are the coordinates to position the label
-                 textcoords="offset points", # how to position the text
-                 xytext=(0,15), # distance from text to points (x,y)
-                 ha='center')
-plt.xticks(rotation = 90)
-plt.show()
+  plt.bar(x, y)
+  for x,y in zip(x,y): 
+    label = "{:.2f}".format(y)
+    plt.annotate(label, # this is the text
+                   (x,y), # these are the coordinates to position the label
+                   textcoords="offset points", # how to position the text
+                   xytext=(0,2), # distance from text to points (x,y)
+                   ha='center')
+  plt.xticks(rotation = 90)
+  
+  if title: 
+    plt.title(title)
+  
+  plt.ylabel(col)
+    
+  plt.show()
+
+# COMMAND ----------
+
+plotPerformance(modelComparisonsDF, col = 'f_beta_score', title = 'Experimental F-Beta Scores on 10-Fold Cross-Validation')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/5_.png?token=ASLJSWY5Y635JT4BMOIYIH3BW2LCO)
+
+# COMMAND ----------
+
+plotPerformance(modelComparisonsDF, col = 'runtime', title = 'Experimental Runtimes on 10-Fold Cross-Validation')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/7_.png?token=ASLJSWZEAIEJVKLPSQBQQY3BW2LFS)
 
 # COMMAND ----------
 
@@ -2929,6 +3136,12 @@ print(f'Weighted Gini Impurity for spliting categorical_feature on "b": {cumulat
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/8_.png?token=ASLJSW376ZPYJB3UF3TT7GLBW2LIG)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC When we split on a continuous feature, the dataframe is sorted by the categorical feature, and the average of every two values is taken. These average values are then consitered as potential split points and the gini impurity is calculated at each potential split point. Below is an example of this.
 
 # COMMAND ----------
@@ -2984,6 +3197,12 @@ for i in list(toy_df.means[:-1]):
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/9_.png?token=ASLJSW5YZCASICFZC5LPFOLBW2LMC)
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC After running using the equations detailed above to find the weighted gini impurity at each potential split point of both the categorical and continuous variable, we can see that the optimal split point is the categorical feature, split on 'a' because it results in the lowest gini impurity of 0.199. As a result this feature and split point will be the root (the first split point) of the decision tree. This process will be repeated at each node until 1) there is a pure split, 2) we reach a maximum depth specified as a hyperparameter, or 3) we do not meat a minimum information gain threshold specified as a hyperparameter. Once we meet one of these 3 conditions, the final node on the tree branches becomes a 'leaf' which is what the decision tree will use to make its final decisions.
 # MAGIC   
 # MAGIC   In the context of classification, a decision tree will return the most probable answer on the leaf it ends up on. In our example above, if we had a decision tree that has only one split on the categorical feature at point 'a' then our branches would have the following counts:
@@ -3009,39 +3228,48 @@ for i in list(toy_df.means[:-1]):
 
 # COMMAND ----------
 
-# Logic to select the most performant model along both F-beta and runtime. 
-prev_fbeta = None
-alpha_sig_value = 0.05
-prev_runtime = None
-best_model_index = None
-
-for index, row in modelComparisonsDF.iterrows(): 
-  if index > 0: 
-    #Update current row values
-    current_fbeta = row['f_beta_score']
-    #Current p_value
-    current_p_value = row['p_value_to_prev']
-    #TODO: Substitute runtime column
-    current_runtime = None
-    #If performance is better, with constant or better runtime, select model regardless of significance. 
-    #if current_fbeta > prev_fbeta and current_runtime <= prev_runtime: 
-    #  best_model_index = index
-    #If performance is significantly better, select model regardless of runtime. 
-    if current_fbeta > prev_fbeta and current_p_value < alpha_sig_value: 
-      best_model_index = index
-  else: 
-    # Append null if on first row
-    best_model_index = index
-
-  #Update the previous row values
-  prev_fbeta = row['f_beta_score']
+def selectBestModel(df = modelComparisonsDF): 
+  '''Given a sorted (by F-beta score) Dataframe of models, runtimes, and p-values, 
+  select the best model that 1.) Is significantly better than previous model (p < alpha)
+  OR 2.) Is not statistically better than previous model, but has improved runtime.'''
+  
+  # Logic to select the most performant model along both F-beta and runtime. 
+  prev_fbeta = None
+  alpha_sig_value = 0.05
   prev_runtime = None
+  best_model_index = None
+
+  for index, row in df.iterrows(): 
+    if index > 0: 
+      #Update current row values
+      current_fbeta = row['f_beta_score']
+      #Current p_value
+      current_p_value = row['p_value_to_prev']
+      # Current runtime
+      current_runtime = row['runtime']
+      #If performance is better, with constant or better runtime, select model regardless of significance. 
+      if current_fbeta > prev_fbeta and current_runtime <= prev_runtime: 
+        best_model_index = index
+      #If performance is significantly better, select model so long as runtime is less than 2x the previous model. 
+      elif current_fbeta > prev_fbeta and current_p_value < alpha_sig_value and current_runtime < (prev_runtime * 2): 
+        best_model_index = index
+    else: 
+      # Append null if on first row
+      best_model_index = index
+
+    #Update the previous row values
+    prev_fbeta = row['f_beta_score']
+    prev_runtime = row['runtime']
 
 
-best_model = modelComparisonsDF["model_obj"][best_model_index]
-best_model_name = modelComparisonsDF["model_name"][best_model_index]
+  best_model = df["model_obj"][best_model_index]
+  best_model_name = df["model_name"][best_model_index]
 
-best_model_name
+  return best_model, best_model_name
+
+# COMMAND ----------
+
+best_model, best_model_name = selectBestModel(modelComparisonsDF)
 
 # COMMAND ----------
 
@@ -3058,38 +3286,34 @@ NUM_PARAM_VALUES = 3
 # COMMAND ----------
 
 ### 1.) Decision Tree Classifier ###
-dt_model = DecisionTreeClassifier(featuresCol = 'features', labelCol='dep_del15')
+dt_model = DecisionTreeClassifier(featuresCol = model_features, labelCol='dep_del15')
 
 # DT Param Grid
-final_paramGrid = ParamGridBuilder() \
-    .addGrid(dt_model.minInfoGain, random.sample(list(np.linspace(0,4,5)), NUM_PARAM_VALUES)) \
+dt_paramGrid = ParamGridBuilder() \
+    .addGrid(dt_model.minInfoGain, random.sample(list(np.linspace(0.0,0.6,7)), NUM_PARAM_VALUES)) \
     .addGrid(dt_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
     .build()
 
 
 ### 2.) Gradient Boosted Tree Classifier ###
-gbt_model = GBTClassifier(featuresCol = 'features', labelCol='dep_del15', maxIter = 20)
+gbt_model = GBTClassifier(featuresCol = model_features, labelCol='dep_del15', maxIter = 20)
 
 # GBT Param Grid
 gbt_paramGrid = ParamGridBuilder() \
-    .addGrid(gbt_model.minInfoGain, random.sample(list(np.linspace(0,4,5)), NUM_PARAM_VALUES)) \
+    .addGrid(gbt_model.minInfoGain, random.sample(list(np.linspace(0.0,0.6,7)), NUM_PARAM_VALUES)) \
     .addGrid(gbt_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
     .build()
 
 
 ### 3.) Random Forest Classifier ###
-rf_model = RandomForestClassifier(featuresCol = 'features', labelCol='dep_del15')
+rf_model = RandomForestClassifier(featuresCol = model_features, labelCol='dep_del15')
 
 # RF Param Grid
 rf_paramGrid = ParamGridBuilder() \
-    .addGrid(gbt_model.minInfoGain, random.sample(list(np.linspace(0,6,7)), NUM_PARAM_VALUES)) \
-    .addGrid(gbt_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
+    .addGrid(rf_model.minInfoGain, random.sample(list(np.linspace(0.0,0.6,7)), NUM_PARAM_VALUES)) \
+    .addGrid(rf_model.maxDepth, random.sample(list(np.linspace(0, MAX_TREE_DEPTH, MAX_TREE_DEPTH + 1)), NUM_PARAM_VALUES)) \
     .build()
 
-
-# COMMAND ----------
-
-best_model_name
 
 # COMMAND ----------
 
@@ -3106,23 +3330,27 @@ elif best_model_name == 'Gradient Boosted Tree':
 
 bestModelList = [(best_model, best_model_name + ' Full Model', best_paramGrid)]
 
-# COMMAND ----------
-
-
+print(f'Best Model from Cross-Validation Experimentation: {best_model_name}')
 
 # COMMAND ----------
 
 #Build comparison table. 
 for model, model_name, paramGrid in bestModelList: 
-  model_name, bestModel, features, f_beta_score, stdDev, paramGrid, bestParams = compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid, train_data = train_model_small)
-  a_series = pd.Series([model_name, bestModel, features, f_beta_score, stdDev, paramGrid, bestParams, None], index = modelComparisonsDF.columns)
+  model_name, bestModel, features, f_beta_score, stdDev, paramGrid, bestParams, runtime = compareBaselines(model = model, model_name = model_name, paramGrid = paramGrid, train_data = train_model)
+  a_series = pd.Series([model_name, bestModel, features, f_beta_score, stdDev, paramGrid, bestParams, runtime, None], index = modelComparisonsDF.columns)
   modelComparisonsDF = modelComparisonsDF.append(a_series, ignore_index=True)
 
 modelComparisonsDF
 
 # COMMAND ----------
 
-# MAGIC %md Take the best model, now fully tuned on the full dataset. Fit on the full trainset and test on the full testset. 
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/10_.png?token=ASLJSW7XQEQ4KARLPQVOCPDBW2LPK)
+
+# COMMAND ----------
+
+# MAGIC %md Take the best cross-validated model, now fully tuned on the full dataset. Fit on the full trainset and test on the full testset. 
 
 # COMMAND ----------
 
@@ -3131,9 +3359,13 @@ test_predictions = bestModel.transform(test_model)
 f_beta = MulticlassClassificationEvaluator(labelCol='dep_del15', predictionCol='prediction', metricName='f1', beta = 0.5, metricLabel = 1)
 final_f_beta_score = f_beta.evaluate(test_predictions)
 
-a_series = pd.Series([model_name + ' Test Results', bestModel, features, final_f_beta_score, None, None, bestParams, None], index = modelComparisonsDF.columns)
+a_series = pd.Series([model_name + ' Test Results', bestModel, features, final_f_beta_score, None, None, bestParams, runtime, None], index = modelComparisonsDF.columns)
 modelComparisonsDF = modelComparisonsDF.append(a_series, ignore_index=True)
-modelComparisonsDF
+
+# COMMAND ----------
+
+# Save test model predictions to blob storage. 
+test_predictions.write.mode('overwrite').parquet(f"{blob_url}/test_predictions")
 
 # COMMAND ----------
 
@@ -3144,7 +3376,70 @@ modelComparisonsDF
 
 # COMMAND ----------
 
+# Display cleaned summary table. 
+modelComparisonsDF[['model_name', 'f_beta_score', 'f_beta_std_dev', 'p_value_to_prev']].fillna(-1).round(decimals = 2).replace(-1, '--')
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/11_.png?token=ASLJSWZTYDBQNHDR4UYWO4TBW2LT2)
+
+# COMMAND ----------
+
+# Display formatted bar chart comparison. 
+plotPerformance(modelComparisonsDF, col = 'f_beta_score', title = 'Final F-Beta Scores across Cross-Validation and Test Data')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/12_.png?token=ASLJSWYHD6E2IG7HZV47IF3BW2LWU)
+
+# COMMAND ----------
+
+# Display formatted bar chart comparison. 
+plotPerformance(modelComparisonsDF, col = 'runtime', title = 'Final Runtimes across Cross-Validation and Test Data')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/13_.png?token=ASLJSW7I6RBX6NKNDOKHNVTBW2LZS)
+
+# COMMAND ----------
+
+#Plot confusion matrix of final test predictions. 
+confusion_matr = confusion_matrix(test_predictions, prediction_col = 'prediction', label_col = 'dep_del15')
+confusion_matr
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/14_.png?token=ASLJSW3UXFJXGR6BIMWHDSLBW2L5U)
+
+# COMMAND ----------
+
+#Print best parameters for our final model. 
+bestParams
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/15_.png?token=ASLJSWZL6CUNMSAZLURFT23BW2L76)
+
+# COMMAND ----------
+
+total_notebook_elapsed_time = time.time() - notebook_start
+print(f'Total Notebook Elapsed Runtime: {total_notebook_elapsed_time}')
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/16_.png?token=ASLJSW7E5PMTLGU3Z56ANXLBW2MDA)
 
 # COMMAND ----------
 
