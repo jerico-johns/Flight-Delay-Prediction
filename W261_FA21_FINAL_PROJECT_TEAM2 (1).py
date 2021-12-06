@@ -972,6 +972,13 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_features_table.png?token=AOG7ANS2IDXYRUVKLGMNDGTBW277C)
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_features_histograms.png?token=AOG7ANTGKETMQM27EGH4ECDBW2766)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
 # MAGIC ## Build Pipeline
 
 # COMMAND ----------
