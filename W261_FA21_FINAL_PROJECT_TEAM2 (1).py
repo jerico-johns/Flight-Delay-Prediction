@@ -220,6 +220,18 @@ def f_beta(prediction_df, beta = 0.5):
 
 # MAGIC %md
 # MAGIC 
+# MAGIC We are supplied with three datasets:
+# MAGIC 
+# MAGIC -	Historical Flights from 20XX to 2019 - contains data such as the origin airport, destination airport, the scheduled flight departure and arrivals in local datetime, the actual flight departures and arrivals in local datetime, and other various summary data such as carrier, cancellations, diversions, etc.
+# MAGIC 
+# MAGIC -	Weather Stations - contains data regarding the lat/lon location of the weather station and a unique identifier.
+# MAGIC 
+# MAGIC -	Weather - contains such as the unique identifier of the reporting weather station, the capture datetime, and various pieces of weather information (temperature, visibility, etc.). 
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
 # MAGIC ## Airport Data
 # MAGIC 
 # MAGIC The lat/lon locations and timezone offsets for airports is downloaded from OpenFlights.org, the entire dataset is 7,697 rows. The historical flight data only contains domestic flights so we only keep airports that are in the US and that have a UTC offset, this reduces the dataset down to 1,512 rows.
@@ -245,6 +257,12 @@ if RENDER_EDA_TABLES:
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_airports.png?token=AOG7ANWUYF467YGCREW6YWLBW2D42)
+
+# COMMAND ----------
+
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Weather Station Data
@@ -258,6 +276,12 @@ df_stations = spark.read.parquet(f"{root_data_path}/stations_data/*")
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_stations, sample_fraction=0.01)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_stations.png?token=AOG7ANVSO2VV2R2ZMFXBUL3BW2D56)
 
 # COMMAND ----------
 
@@ -311,6 +335,12 @@ else:
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_closest_airport_station, sample_fraction=1.0)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![Weather Station EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_station_airport.png?token=AOG7ANXPAEWB4VKIELP2OJDBW2D6Y)
 
 # COMMAND ----------
 
@@ -397,6 +427,13 @@ df_flights = df_flights.toDF(*[c.lower() for c in df_flights.columns])
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_flights, 0.001, df_flights_fields)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_flight_1.png?token=AOG7ANSGRYCWHLR7HZRJ2TDBW2EKK)
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_flight_2.png?token=AOG7ANTIGOTBV7VJNDPHVM3BW2EKU)
 
 # COMMAND ----------
 
@@ -592,6 +629,12 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_raw.png?token=AOG7ANVGP3Y4SXBCNADBQYTBW2ZFU)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
 # MAGIC ## Weather Data Aggregation
 # MAGIC 
 # MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. The aggregation of the weather data allows us to match this bucketed timeframe to bucketed timeframes for the fights, it takes the dataset from 93,145,915 rows to 70,539,940. 
@@ -621,6 +664,12 @@ df_weather_summary = df_weather.withColumn('aggregated_datetime',
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_weather_summary, 0.002, df_weather_fields)
   displayHTML(html)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_weather_aggregated.png?token=AOG7ANWEGLVQBS4JVDWJJWDBW2ZJY)
 
 # COMMAND ----------
 
@@ -712,9 +761,7 @@ df_joined = df_joined.drop(*junk_features)
 # MAGIC 
 # MAGIC ## Impute missing weather features
 # MAGIC 
-# MAGIC There are XXXXX flights that do not contain weather information, however, we do not wish to exclude these from training. We impute 
-# MAGIC 
-# MAGIC Rather than setting the NULLs to zero, which for some features be an extreme value, we set the NULLs to the mean.
+# MAGIC As we an see in aggregated weather EDA table from there are several weather features that have NULL values. Rather than setting the NULLs to zero, which for some features would be an extreme value, we set the NULLs to the mean. 
 
 # COMMAND ----------
 
@@ -745,8 +792,14 @@ if RENDER_EDA_TABLES:
 
 # MAGIC %md
 # MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_joined_1.png?token=AOG7ANQSXBMURVROBXXKNXLBW22W6)
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_joined_2.png?token=AOG7ANXPBA4EKMROB4H7TYLBW22XG)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
 # MAGIC # Feature Engineering
-# MAGIC Apply relevant feature transformations, dimensionality reduction if needed, interaction terms, treatment of categorical variables, etc.. Justify your choices.
 
 # COMMAND ----------
 
@@ -778,7 +831,7 @@ df_joined = df_joined.withColumn("dep_minute_of_day", (sf.hour('dep_datetime_loc
 # MAGIC 
 # MAGIC ## Previous Flight Delayed
 # MAGIC 
-# MAGIC Domestic flights typically have multiple legs throughout the day, meaning they drop passengers off at different stops. Airlines build buffer into the flight schedule to accomodate delays, however, that buffer is very limited. If the previous flight is delayed by more than the buffer then the next flight is going to be delayed. However, because we are predicting flight delays by two-hours ahead of time, only if the previous flight is longer than two hours will we know if it was delayed.
+# MAGIC Domestic flights typically have multiple legs throughout the day; meaning they drop passengers off at a airport, pickup more passengers, and continue on. Airlines build buffer into the flight schedule to accomodate delays, however, if the previous flight is delayed by more than the buffer then the next flight is going to be delayed. However, because we are predicting flight delays by two hours ahead of time, only if the previous flight is longer than two hours will we know if it was delayed.
 
 # COMMAND ----------
 
@@ -813,7 +866,7 @@ df_joined = df_joined.na.fill(value=0, subset=zero_fills)
 # MAGIC 
 # MAGIC ## Log10 
 # MAGIC 
-# MAGIC We perform a log10 on all the continuious fields, this has the affect of sacrificing data fidelity in exchange for usually normalizing the data. 
+# MAGIC We perform a log10 on all the continuious fields, this has the affect of sacrificing data fidelity in exchange for normalizing the data, reducing the impact of outliers, and ultimately, giving out models better data for making predictions. 
 
 # COMMAND ----------
 
@@ -847,6 +900,14 @@ if RENDER_EDA_TABLES:
 
   df_joined_sample.hist(figsize=(35,35), bins=15)
   plt.show()    
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC 
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_final_1.png?token=AOG7ANUHR5HYIZ3QFKE4TQDBW245G)
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_final_2.png?token=AOG7ANXI3PXJBEHFZSJUHVTBW245Q)
+# MAGIC ![EDA Table](https://raw.githubusercontent.com/UCB-w261/w261-f21-finalproject-team-02/master/images/eda_histograms.png?token=AOG7ANS3QPAH3RGNNCORN53BW25F4)
 
 # COMMAND ----------
 
@@ -898,14 +959,6 @@ df_raw_features = df_raw_features.na.fill(value=0, subset=['previous_flight_dep_
 
 imputer = Imputer(inputCols=continuous_features, outputCols=continuous_features).setStrategy("mean")
 df_raw_features = imputer.fit(df_raw_features).transform(df_raw_features)
-
-if RENDER_EDA_TABLES:
-  
-  html, df_raw_features_sample = generate_eda_table(df_raw_features, 0.001, {})
-  displayHTML(html)
-
-  df_raw_features_sample.hist(figsize=(35,35), bins=15)
-  plt.show() 
 
 # COMMAND ----------
 
