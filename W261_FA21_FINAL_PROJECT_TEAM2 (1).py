@@ -54,7 +54,7 @@ spark.conf.set(
 )
 
 INITIALIZE_DATASETS = False
-RENDER_EDA_TABLES = False
+RENDER_EDA_TABLES = True
 WEATHER_AGGREGATE_WINDOW_SECONDS = 60 * 30 # 30 minutes
 
 
@@ -83,7 +83,7 @@ def generate_eda_table(df_spark, sample_fraction=0.1, fields={}):
       info = fields.get(column_name, {})
       column_desc = info.get('description', None) or ''
       column_type = str(df_spark.schema[column_name].dataType)
-      is_numeric = column_type == 'DoubleType'
+      is_numeric = column_type == 'DoubleType' or column_type == 'IntegerType'
       
       mean_val = round(means[column_name], 2) if is_numeric else 0
       min_val = round(mins[column_name], 2) if is_numeric else 0
@@ -207,8 +207,6 @@ def f_beta(prediction_df, beta = 0.5):
 # MAGIC %md
 # MAGIC 
 # MAGIC # EDA & Discussion of Challenges
-# MAGIC 
-# MAGIC Determine a handful of relevant EDA tasks that will help you make decisions about how you implement the algorithm to be scalable. Discuss any challenges that you anticipate based on the EDA you perform.
 
 # COMMAND ----------
 
@@ -216,7 +214,7 @@ def f_beta(prediction_df, beta = 0.5):
 # MAGIC 
 # MAGIC ## Airport Data
 # MAGIC 
-# MAGIC The lat/lon locations and timezone information for airports is downloaded from OpenFlights.org. The historical flight data only contains domestic flights so we only keep locations that are in the US, that are an actual sirport, and that have a UTC offset.
+# MAGIC The lat/lon locations and timezone offsets for airports is downloaded from OpenFlights.org, the entire dataset is 7,697 rows. The historical flight data only contains domestic flights so we only keep airports that are in the US and that have a UTC offset, this reduces the dataset down to 1,512 rows.
 
 # COMMAND ----------
 
@@ -243,7 +241,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Weather Station Data
 # MAGIC 
-# MAGIC The Weather Station dataset contains data about all XXXXX NOAA weather stations.
+# MAGIC The Weather Station dataset contains data about 5,004,169 NOAA weather stations.
 
 # COMMAND ----------
 
@@ -259,7 +257,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Joining Airports to Weather Stations
 # MAGIC 
-# MAGIC We are only interested in the weather stations closest to the airports, so we are able to eliminate YY% of the weather stations by joining it to the Airport dataset. The join is more complex than a simple key-based join, we use the distance of the weather station from the airport as the predicate for selecting which weather station is the closest. If an airport does not have a weather station within 5 kilometers then the airport is eliminated from the list of candidate airports because weather is hyperlocal and anything more than 5 kilometers aways will have a minimal effect on the airport's departure. 
+# MAGIC We are only interested in the weather stations closest to the airports, so we are able to eliminate 99.9742% of the weather stations by joining it to the Airport dataset, so there's only 1,291 rows. The join is more complex than a simple key-based join, we use the distance of the weather station from the airport as the predicate for selecting which weather station is the closest. If an airport does not have a weather station within 5 kilometers then the airport is eliminated from the list of candidate airports because weather is hyperlocal and anything more than 5 kilometers aways will have a minimal effect on the airport's departure. 
 
 # COMMAND ----------
 
@@ -288,7 +286,7 @@ if INITIALIZE_DATASETS:
   df_airport_station_distances = df_airport_station_distances.select('*', udf_get_distance(df_airport_station_distances.station_lat, 
                                                                                            df_airport_station_distances.station_lon,
                                                                                            df_airport_station_distances.airport_lat, 
-                                                                                      df_airport_station_distances.airport_lon).alias('distance').cast(DoubleType()))
+                                                                                           df_airport_station_distances.airport_lon).alias('distance').cast(DoubleType()))
   
   df_airport_station_shortest_distance = df_airport_station_distances.groupBy('icao').agg(sf.min(sf.col('distance')).alias('distance'))
   
@@ -296,12 +294,15 @@ if INITIALIZE_DATASETS:
   df_closest_airport_station = df_closest_airport_station.where('distance <= 5')
   df_closest_airport_station = df_closest_airport_station.drop('airport_lat', 'airport_lon', 'station_lat', 'station_lon', 'count', 'distance')
   
+  dbutils.fs.rm(f"{blob_url}/df_closest_airport_station", True)
   df_closest_airport_station.write.mode('overwrite').parquet(f"{blob_url}/df_closest_airport_station")
   
 else:
   df_closest_airport_station = spark.read.parquet(f'{blob_url}/df_closest_airport_station/')
   
-df_closest_airport_station.count()
+if RENDER_EDA_TABLES:
+  html, _ = generate_eda_table(df_closest_airport_station, sample_fraction=1.0)
+  displayHTML(html)
 
 # COMMAND ----------
 
@@ -309,7 +310,7 @@ df_closest_airport_station.count()
 # MAGIC 
 # MAGIC ## Historical Flights Dataset
 # MAGIC 
-# MAGIC The Historical Flight dataset contains XXXXXX historical flights from years 20XX to 2019.
+# MAGIC The Historical Flight dataset contains 63,493,682 commerical domestic flights from years 2015 to 2019.
 
 # COMMAND ----------
 
@@ -382,7 +383,7 @@ df_flights_fields = {
 
 df_flights = spark.read.parquet(f'{root_data_path}/parquet_airlines_data/*')
 
-# Convert all features to lowercase to reduce confusion
+# Convert all features to lowercase names to reduce confusion
 df_flights = df_flights.toDF(*[c.lower() for c in df_flights.columns])
 
 if RENDER_EDA_TABLES:
@@ -395,7 +396,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Remove Invalid & Duplicate Flights
 # MAGIC 
-# MAGIC Flights that have been cancelled, diverted, lack an arrival time, lack a tail number, have a flight time less than 30 minutes, lack a depature time, or lack an arrival delay are considered invalid and should not be used in the valid datasets. Additionally, flights that have the plane visit the same airport more than once in the same day should be considered duplicates. 
+# MAGIC Flights that have been cancelled, diverted, lack an arrival time, lack a tail number, have a flight time less than 30 minutes, lack a depature time, or lack an arrival delay are considered invalid. Additionally, flights that have the plane visit the same airport more than once in the same day should be considered duplicates. This reduces this dataset from 63,493,682 down to 48,844,778.
 
 # COMMAND ----------
 
@@ -489,7 +490,9 @@ for previous_flight_feature in previous_flight_features:
 # MAGIC 
 # MAGIC ## Weather Data
 # MAGIC 
-# MAGIC The weather data contains XXXXX rows. Some of the data has already been parsed into columns and some of the data that is comma-delimited. Special values in the specific weather aspects mean NULL, those are usually in the form of a series of 9s.
+# MAGIC The original weather dataset contains 630,904,436 rows. The fields WND, CIG, VIS, TMP, DEW, and SLP contain comma-delimited information regarding the raw values, qauality of the reading, additional coded values, and "magic" values mean NULL.
+# MAGIC 
+# MAGIC We join the weather data to the just the weather stations that are closest to the airports and we end up with 93,145,915 rows of weather data.
 
 # COMMAND ----------
 
@@ -583,7 +586,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Weather Data Aggregation
 # MAGIC 
-# MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. This aggregation allows us to match weather data to flight data.
+# MAGIC We aggregate the weather data into 30 minute windows, recording the mean, min and max of all numeric weather features in that timeframe. The aggregation of the weather data allows us to match this bucketed timeframe to bucketed timeframes for the fights, it takes the dataset from 93,145,915 rows to 70,539,940. 
 
 # COMMAND ----------
 
@@ -601,12 +604,11 @@ for numeric_weather_feature in numeric_weather_features:
                                sf.min(numeric_weather_feature).alias(f'{numeric_weather_feature}_min'), 
                                sf.max(numeric_weather_feature).alias(f'{numeric_weather_feature}_max')]
 
+# We bucket the read_date of the into 30 minute buckets
 seconds_window = sf.from_unixtime(sf.unix_timestamp('read_date') - sf.unix_timestamp('read_date') % WEATHER_AGGREGATE_WINDOW_SECONDS)
 df_weather_summary = df_weather.withColumn('aggregated_datetime', 
                                            seconds_window.cast(TimestampType())).groupBy('station_id', 
                                                                                          'aggregated_datetime').agg(*expressions)
-
-df_weather_summary = df_weather_summary.cache()
 
 if RENDER_EDA_TABLES:
   html, _ = generate_eda_table(df_weather_summary, 0.002, df_weather_fields)
@@ -618,7 +620,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Join Flight Data to Weather Data
 # MAGIC 
-# MAGIC Finally we join the historical flight data with XXXXXX rows to the weather data with YYYYYY rows. 
+# MAGIC We join the flight dataset with the weather dataset by bucketing the `crs_dep_datetime_utc` of the flight dataset into 30 minute buckets just like we did for the weather data and then perform a left join on the bucketed timestamps. We perform a left-join to keep flights that do not have any weather data associated.
 
 # COMMAND ----------
 
@@ -722,7 +724,9 @@ df_joined = df_negative_sample.union(df_positive_sample)
 # MAGIC 
 # MAGIC ## Impute missing weather features
 # MAGIC 
-# MAGIC There are XXXXX flights that do not contain weather information, however, we do not wish to exclude these. Rather than setting the NULLs to zero, which for some features be an extreme value, we set the NULLs to the mean.
+# MAGIC There are XXXXX flights that do not contain weather information, however, we do not wish to exclude these from training. We impute 
+# MAGIC 
+# MAGIC Rather than setting the NULLs to zero, which for some features be an extreme value, we set the NULLs to the mean.
 
 # COMMAND ----------
 
@@ -762,7 +766,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Day of Year
 # MAGIC 
-# MAGIC Day of the 
+# MAGIC There are certain times of the year where people travel more than others; summer break, Thanksgiving, July 4th, etc. Depending on the days of the week and school schedules, these popular travel days can vary year-to-year but generally fall into the same 10-day range year-after-year. We have added the `day of year` feature to capture these busy travel days and the potential congestion they cause.  
 
 # COMMAND ----------
 
@@ -773,6 +777,8 @@ df_joined = df_joined.withColumn('dep_day_of_year', sf.dayofyear('dep_datetime_l
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Minute of Day
+# MAGIC 
+# MAGIC Much like the `day of year`, `minute of day` is designed to capture the approximate time of day that people generally prefer to travel with more granularity than simply the hour.  
 
 # COMMAND ----------
 
@@ -783,6 +789,8 @@ df_joined = df_joined.withColumn("dep_minute_of_day", (sf.hour('dep_datetime_loc
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Previous Flight Delayed
+# MAGIC 
+# MAGIC Domestic flights typically have multiple legs throughout the day, meaning they drop passengers off at different stops. Airlines build buffer into the flight schedule to accomodate delays, however, that buffer is very limited. If the previous flight is delayed by more than the buffer then the next flight is going to be delayed. However, because we are predicting flight delays by two-hours ahead of time, only if the previous flight is longer than two hours will we know if it was delayed.
 
 # COMMAND ----------
 
@@ -803,6 +811,8 @@ df_joined = df_joined.withColumn('previous_flight_dep_delay_new_2',
 # MAGIC %md
 # MAGIC 
 # MAGIC ## Handle NULL values
+# MAGIC 
+# MAGIC Flights that did not have a previous leg will, by defintion, will not be delayed by a previous leg, so we set the `previous_flight_crs_elapsed_time` and `previous_flight_dep_delay_new` features to zero.
 
 # COMMAND ----------
 
@@ -815,6 +825,8 @@ df_joined = df_joined.na.fill(value=0, subset=zero_fills)
 # MAGIC %md 
 # MAGIC 
 # MAGIC ## Log10 
+# MAGIC 
+# MAGIC We perform a log10 on all the continuious fields, this has the affect of sacrificing data fidelity in exchange for usually normalizing the data. 
 
 # COMMAND ----------
 
@@ -831,9 +843,6 @@ for numerical_feature in numerical_features:
 # MAGIC ## Load or Persist Final Dataset
 
 # COMMAND ----------
-
-# print(df_joined.count())
-# print(df_joined.take(5))
 
 if INITIALIZE_DATASETS:
   dbutils.fs.rm(f"{blob_url}/df_joined_final", True)
@@ -863,30 +872,30 @@ if RENDER_EDA_TABLES:
 target_feature = 'dep_del15'
 split_feature = 'crs_dep_datetime_utc'
 categorical_features = list({'dest',
-                        'origin',
-                        'op_unique_carrier',
-                        'year', 
-                        'month',
-                        'day_of_week',
-                        'previous_flight_origin_airport_id'})
+                             'origin',
+                             'op_unique_carrier',
+                             'year', 
+                             'month',
+                             'day_of_week',
+                             'previous_flight_origin_airport_id'})
 
 continuous_features = list({'day_of_month',
-                      'dep_minute_of_day',
-                      'dep_day_of_year_log',
-                      'taxi_out_log',
-                      'taxi_in_log',
-                      'crs_elapsed_time_log',
-                      'distance_log',
-                      'previous_flight_crs_elapsed_time_log',
-                      'wind_speed_mean_log',
-                      'wind_speed_max_log',
-                      'ceiling_height_mean_log',
-                      'visibility_distance_mean_log',
-                      'visibility_distance_max_log',
-                      'temperature_mean_log',
-                      'temperature_dewpoint_mean_log',
-                      'air_pressure_mean_log',
-                      'previous_flight_dep_delay_new_2_log'})
+                            'dep_minute_of_day',
+                            'dep_day_of_year_log',
+                            'taxi_out_log',
+                            'taxi_in_log',
+                            'crs_elapsed_time_log',
+                            'distance_log',
+                            'previous_flight_crs_elapsed_time_log',
+                            'wind_speed_mean_log',
+                            'wind_speed_max_log',
+                            'ceiling_height_mean_log',
+                            'visibility_distance_mean_log',
+                            'visibility_distance_max_log',
+                            'temperature_mean_log',
+                            'temperature_dewpoint_mean_log',
+                            'air_pressure_mean_log',
+                            'previous_flight_dep_delay_new_2_log'})
 
 all_features = categorical_features + continuous_features
 all_features.append(target_feature)
@@ -900,7 +909,7 @@ df_raw_features = df_raw_features.na.fill(value=0, subset=['previous_flight_dep_
 imputer = Imputer(inputCols=continuous_features, outputCols=continuous_features).setStrategy("mean")
 df_raw_features = imputer.fit(df_raw_features).transform(df_raw_features)
 
-if True: #RENDER_EDA_TABLES:
+if RENDER_EDA_TABLES:
   
   html, df_raw_features_sample = generate_eda_table(df_raw_features, 0.001, {})
   displayHTML(html)
