@@ -272,7 +272,7 @@ if RENDER_EDA_TABLES:
 # MAGIC 
 # MAGIC ## Joining Airports to Weather Stations
 # MAGIC 
-# MAGIC We are only interested in the weather stations closest to the airports, so we are able to eliminate 99.9742% of the weather stations by joining it to the Airport dataset, so there's only 1,291 rows. The join is more complex than a simple key-based join, we use the distance of the weather station from the airport as the predicate for selecting which weather station is the closest. If an airport does not have a weather station within 5 kilometers then the airport is eliminated from the list of candidate airports because weather is hyperlocal and anything more than 5 kilometers aways will have a minimal effect on the airport's departure. 
+# MAGIC We are only interested in the weather stations closest to the airports, so we are able to eliminate 99.9742% of the weather stations by joining it to the Airport dataset, so there's only 1,291 rows. The join is more complex than a simple key-based join, we use the distance of the weather station from the airport as the predicate for selecting which weather station is the closest. If an airport does not have a weather station within 5 kilometers then the airport is eliminated from the list of candidate airports because weather is hyperlocal and anything more than 5 kilometers aways will have a minimal effect on an airport's departures. 
 
 # COMMAND ----------
 
@@ -502,7 +502,7 @@ df_valid_flights = df_valid_flights.withColumn('rank', sf.percent_rank().over(Wi
 # MAGIC 
 # MAGIC ## Previous Flight Data
 # MAGIC 
-# MAGIC We believe that certain pieces of previous flight information for a tail number in the same day, in other words, the previous leg of a multi-leg flight, contains valuable information for predicting late departures. If an airplane is delayed on one leg, it is highly likely that it will also be delayed on subsequent legs. 
+# MAGIC We believe that certain pieces of the previous leg of a multi-leg flight contains valuable information for predicting late departures. If an airplane is delayed on one leg, it is likely that it will also be delayed on subsequent legs. 
 
 # COMMAND ----------
 
@@ -518,7 +518,7 @@ for previous_flight_feature in previous_flight_features:
 # MAGIC 
 # MAGIC ## Weather Data
 # MAGIC 
-# MAGIC The original weather dataset contains 630,904,436 rows. The fields WND, CIG, VIS, TMP, DEW, and SLP contain comma-delimited information regarding the raw values, qauality of the reading, additional coded values, and "magic" values mean NULL.
+# MAGIC The original weather dataset contains 630,904,436 rows. The fields WND, CIG, VIS, TMP, DEW, and SLP contain comma-delimited information regarding the raw values, quality of the reading, and additional coded values.
 # MAGIC 
 # MAGIC We join the weather data to the weather stations that are closest to the airports and we end up with 93,145,915 rows of weather data.
 
