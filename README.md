@@ -9,6 +9,6 @@ This notebook has all code and can run on command:
 
 
 
-This notebook cannot run, but all the output has been saved as images, so you can view our results as we saw them on our final run:
+This notebook cannot run, but all the output has been saved as images so you can view our results as we saw them on our final run:
 
 * HTML Notebook: W261_FA21_FINAL_PROJECT_TEAM2_WRITEUP.html
